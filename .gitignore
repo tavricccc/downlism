@@ -1,0 +1,6 @@
+bin/
+obj/
+artifacts/
+extension/dist/
+node_modules/
+*.user

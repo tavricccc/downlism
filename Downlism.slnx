@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Downlism.Core/Downlism.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Downlism.Tests/Downlism.Tests.csproj" />
+  </Folder>
+</Solution>
