@@ -4,7 +4,7 @@
 <p align="center">多執行緒下載、斷點續傳，並接手 Chrome 與 Edge 的下載。</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.0-165674?style=flat-square" alt="Version 0.2.0" />
+  <img src="https://img.shields.io/badge/version-0.2.1-165674?style=flat-square" alt="Version 0.2.1" />
   <img src="https://img.shields.io/badge/Windows_11-26100%2B-0078D4?style=flat-square" alt="Windows 11 build 26100+" />
   <img src="https://img.shields.io/badge/WinUI-3-0078D4?style=flat-square" alt="WinUI 3" />
   <img src="https://img.shields.io/badge/.NET-10-512BD4?style=flat-square" alt=".NET 10" />

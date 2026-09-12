@@ -1,7 +1,7 @@
 # One version for the whole product: the installer is never released separately from the
 # app it installs, so a second number would only ever be a thing to keep in sync.
 param(
-    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.2.0'
+    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.2.1'
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -77,6 +77,16 @@ try {
     }
     foreach ($required in @('Downlism.App.exe', 'Downlism.Setup.exe', 'Downlism.Host.exe', 'coreclr.dll', 'Microsoft.UI.Xaml.dll')) {
         if (!$files.Contains($required)) { throw "Missing $required" }
+    }
+    # coreclr.dll being present is not proof that each executable carries its own runtime: the
+    # shared files are merged from several publishes, so one framework-dependent executable can
+    # sit among them and only fail on a machine without the matching .NET installed.
+    foreach ($runtimeConfig in Get-ChildItem -LiteralPath $app -Filter 'Downlism.*.runtimeconfig.json' -File) {
+        $options = (Get-Content -LiteralPath $runtimeConfig.FullName -Raw | ConvertFrom-Json).runtimeOptions
+        if ($options.PSObject.Properties.Name -contains 'framework' -or
+            $options.PSObject.Properties.Name -contains 'frameworks') {
+            throw "$($runtimeConfig.Name) is framework-dependent; publish it self-contained."
+        }
     }
     # Finish the entire release before touching current. Old installers are never pruned.
     @{ Product = 'Downlism'; Version = $Version; Files = $files } | ConvertTo-Json -Depth 5 |
