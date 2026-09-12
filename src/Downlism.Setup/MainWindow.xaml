@@ -1,0 +1,28 @@
+<Window x:Class="Downlism.Setup.MainWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <Grid RowDefinitions="*,Auto">
+  <ScrollViewer VerticalScrollBarVisibility="Auto">
+   <StackPanel Spacing="24" Padding="40" MaxWidth="640" HorizontalAlignment="Stretch">
+    <Image Source="ms-appx:///Assets/Downlism.png" Width="64" Height="64" HorizontalAlignment="Left" AutomationProperties.Name="Downlism" />
+    <StackPanel Spacing="8">
+     <TextBlock FontFamily="Microsoft JhengHei UI" x:Name="Heading" Text="安裝 Downlism" Style="{ThemeResource TitleTextBlockStyle}" />
+     <TextBlock x:Name="VersionText" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+     <TextBlock FontFamily="Microsoft JhengHei UI" x:Name="Description" Text="多執行緒下載與斷點續傳，並可接手 Chrome 與 Edge 的下載。安裝僅套用至目前使用者。" TextWrapping="Wrap" />
+    </StackPanel>
+    <TextBox FontFamily="Microsoft JhengHei UI" x:Name="InstallPath" Header="安裝資料夾" AutomationProperties.Name="安裝資料夾" />
+    <CheckBox FontFamily="Microsoft JhengHei UI" x:Name="DesktopShortcut" Content="建立桌面捷徑" IsChecked="False" />
+    <CheckBox FontFamily="Microsoft JhengHei UI" x:Name="KeepData" Content="保留設定與使用紀錄" IsChecked="False" Visibility="Collapsed" />
+    <TextBlock FontFamily="Microsoft JhengHei UI" x:Name="Details" Text="開始功能表捷徑會自動建立，並同時登記 Chrome 與 Edge 的下載接手服務。要讓瀏覽器真的交出下載，還需要載入 extension 資料夾裡的擴充功能。" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+    <ProgressBar x:Name="Progress" Visibility="Collapsed" IsIndeterminate="True" />
+    <InfoBar x:Name="Status" IsOpen="False" IsClosable="False" />
+   </StackPanel>
+  </ScrollViewer>
+  <Border Grid.Row="1" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" Padding="40,20">
+   <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
+    <Button FontFamily="Microsoft JhengHei UI" x:Name="CloseButton" Content="取消" MinWidth="96" Click="CloseClick" />
+    <Button FontFamily="Microsoft JhengHei UI" x:Name="ActionButton" Content="安裝" MinWidth="120" Style="{ThemeResource AccentButtonStyle}" Click="ActionClick" />
+   </StackPanel>
+  </Border>
+ </Grid>
+</Window>

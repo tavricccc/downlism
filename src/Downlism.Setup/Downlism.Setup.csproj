@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <ApplicationIcon>..\..\docs\assets\downlism.ico</ApplicationIcon>
+    <ApplicationManifest>..\Downlism.App\app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <ProjectReference Include="..\Downlism.Core\Downlism.Core.csproj" />
+    <Content Include="..\..\docs\assets\downlism.ico" Link="Assets\Downlism.ico" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\docs\assets\downlism-icon-fluent.png" Link="Assets\Downlism.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

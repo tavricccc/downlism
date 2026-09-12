@@ -1,23 +1,38 @@
-# Downlism
+<p align="center"><img src="docs/assets/downlism-icon-fluent.png" width="96" height="96" alt="Downlism" /></p>
 
-Windows 下載管理員。多執行緒分段下載、斷點續傳，並透過瀏覽器擴充功能接管 Chrome 與 Edge 的下載。
+<h1 align="center">Downlism</h1>
+<p align="center">多執行緒下載、斷點續傳，並接手 Chrome 與 Edge 的下載。</p>
 
-Downlism 是獨立產品，與 [Flowlism](https://github.com/tavricccc/flowlism) 啟動器、[Peeklism](https://github.com/tavricccc/peeklism) 預覽工具分開安裝、分開更新。三者共用同一套視覺語言（WinUI 3、Mica、Fluent），但不共用行程，也沒有互相依賴。
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.1.0-165674?style=flat-square" alt="Version 0.1.0" />
+  <img src="https://img.shields.io/badge/Windows_11-26100%2B-0078D4?style=flat-square" alt="Windows 11 build 26100+" />
+  <img src="https://img.shields.io/badge/WinUI-3-0078D4?style=flat-square" alt="WinUI 3" />
+  <img src="https://img.shields.io/badge/.NET-10-512BD4?style=flat-square" alt=".NET 10" />
+  <img src="https://img.shields.io/badge/C%23-239120?style=flat-square" alt="C#" />
+  <img src="https://img.shields.io/badge/SQLite-003B57?style=flat-square" alt="SQLite" />
+  <img src="https://img.shields.io/badge/status-preview-D97706?style=flat-square" alt="Preview" />
+</p>
+
+Downlism 把一個檔案切成多段、用多條連線同時下載，中斷後從原處接回去。它是獨立產品，與 [Flowlism](https://github.com/tavricccc/flowlism) 啟動器、[Peeklism](https://github.com/tavricccc/peeklism) 預覽工具分開安裝、分開更新；三者共用同一套視覺語言（WinUI 3、Mica、Fluent），但不共用行程，也沒有互相依賴。
+
+## 介面
+
+每一列下載都帶著一條**分段進度條**，顯示這次傳輸真正的分段界線，每一段從自己的起點往前填。這條進度條直接讀取續傳用的 sidecar，所以畫面上看到的就是當機後真正能保留下來的進度。一條平均過的進度條會把下載管理員存在的理由藏起來——哪一條連線卡住了，從平均值上永遠看不出來。
+
+數字固定在靠右對齊的欄位裡。一列每秒更新四次，若讓數字自由伸縮，整列會在游標下不停抖動。
 
 ## 現況
 
-專案剛起步。目前完成的是引擎最底層、也最容易寫錯的一段：**在任何位元組落地之前，正確判斷一個 URL 能不能分段下載、要存成什麼檔名，以及中斷後如何接回去**。
-
-| 元件 | 狀態 |
+| 功能 | 狀態 |
 | --- | --- |
-| `Content-Range` 解析 | 完成 |
-| `Content-Disposition` 檔名推導（含 RFC 5987 與惡意路徑淨化） | 完成 |
-| 分段規劃 | 完成 |
-| 分段進度 sidecar（崩潰復原） | 完成 |
-| HTTP 連線設定與探測 | 完成 |
-| 傳輸迴圈 | 未開始 |
-| WinUI 3 介面 | 未開始 |
-| 瀏覽器擴充與 Native Messaging Host | 未開始 |
+| 分段下載、斷點續傳、佇列、速度上限 | 完成 |
+| 貼上網址下載 | 完成 |
+| 清單跨重啟保留（SQLite） | 完成 |
+| 瀏覽器擴充功能與 Native Messaging Host（Chrome、Edge） | 完成 |
+| 安裝程式與瀏覽器登記 | 完成 |
+| 系統匣常駐 | 未開始 |
+| Firefox 擴充功能 | 未開始（見下） |
+| 影片嗅探（HLS／DASH） | 未開始 |
 
 ## 幾個刻意的決定
 
@@ -29,15 +44,32 @@ Downlism 是獨立產品，與 [Flowlism](https://github.com/tavricccc/flowlism)
 
 **單一目標檔搭配 `RandomAccess`，不做分段檔合併。** `SafeFileHandle` 自 .NET 6 起保證可由多執行緒併發寫入不同位移。分段檔再合併要多一倍磁碟空間與 I/O，且合併階段無法中斷。
 
-**分段進度存在 sidecar，不進 SQLite。** 八條連線每秒回報數十次的寫入速率會撐大 WAL 並卡住 checkpoint；崩潰復原只需要「這個檔案下到哪」的局部事實，不需要全域交易一致性。
+**分段進度存在 sidecar，不進 SQLite。** 八條連線每秒回報數十次的寫入速率會撐大 WAL 並卡住 checkpoint；崩潰復原只需要「這個檔案下到哪」的局部事實。SQLite 只保管清單本身。
 
-完整的技術選型與取捨記錄見 `docs/tech-selection.md`。
+**不保存 Cookie。** Cookie 是工作階段憑證，為了讓續傳方便一點而把它寫到磁碟上並不划算。需要登入的續傳會直接失敗並說明原因。
+
+**瀏覽器溝通走 Named Pipe，不走 localhost 連接埠。** 連接埠會觸發防火牆詢問、會衝突，而且任何本機程式都能連上去排下載。Pipe 的 ACL 只開放目前使用者。
+
+完整取捨記錄見 [docs/tech-selection.md](docs/tech-selection.md)。
+
+## 瀏覽器擴充功能
+
+擴充功能以開發者模式載入，安裝程式已經先幫 Chrome、Edge 登記好 Native Messaging Host。設定步驟見 [docs/extension.md](docs/extension.md)。
+
+Firefox 暫時不支援：Firefox 強制簽章，`about:debugging` 的臨時載入重開瀏覽器就消失，必須先跑完 AMO 簽章流程。這是技術限制，不是取捨。
+
+## 未簽章
+
+Downlism 目前沒有程式碼簽章憑證。SmartScreen 會顯示「發行者：不明」，防毒也可能誤報——寫登錄檔、掛進瀏覽器、大量連線、下載檔案到磁碟，這組行為與木馬下載器高度重疊。這是已知且刻意的決定，背景見技術選型文件第 10 節。
 
 ## 建置
 
 ```
 dotnet build Downlism.slnx
 dotnet test Downlism.slnx
+pwsh -File scripts/Publish-Installer.ps1
 ```
 
-需要 .NET SDK 10.0.401 與 Windows 11 build 26100 以上。
+需要 .NET SDK 10.0.401、Node.js（建置擴充功能）與 Windows 11 build 26100 以上。安裝程式產出在 `artifacts/installer/current`：最外層只有 `Downlism.Setup.exe`，其餘檔案在 `resources` 子資料夾，兩者必須一起保留。預設安裝到 `%LocalAppData%\Programs\Downlism`。
+
+`scripts/Smoke-Ui.ps1` 會啟動本機測試伺服器、實際跑一次下載並截圖；`scripts/Smoke-Restore.ps1` 重開程式，確認上一輪的下載有回來而且可以繼續。

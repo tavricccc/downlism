@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- A console executable, deliberately: browsers hand the host its stdin and stdout, and
+         a WinExe would have neither. Chrome launches it with CREATE_NO_WINDOW, so nothing
+         flashes on screen. -->
+    <OutputType>Exe</OutputType>
+    <ApplicationIcon>..\..\docs\assets\downlism.ico</ApplicationIcon>
+    <RootNamespace>Downlism.Host</RootNamespace>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Downlism.Core\Downlism.Core.csproj" />
+  </ItemGroup>
+</Project>

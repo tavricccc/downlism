@@ -1,6 +1,16 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Downlism.App/Downlism.App.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/Downlism.Bootstrap/Downlism.Bootstrap.csproj" />
     <Project Path="src/Downlism.Core/Downlism.Core.csproj" />
+    <Project Path="src/Downlism.Host/Downlism.Host.csproj">
+      <Platform Project="x64" />
+    </Project>
+    <Project Path="src/Downlism.Setup/Downlism.Setup.csproj">
+      <Platform Project="x64" />
+    </Project>
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Downlism.Tests/Downlism.Tests.csproj" />
