@@ -17,7 +17,12 @@ namespace Downlism.Host;
 internal static class Program
 {
     private const int MaximumMessageBytes = 1024 * 1024;
-    private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>How long to wait on an app that should already be listening.</summary>
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(1);
+
+    /// <summary>How long to wait after launching it, which includes a cold WinUI start.</summary>
+    private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(30);
 
     private static async Task<int> Main()
     {
@@ -46,33 +51,45 @@ internal static class Program
 
     private static async Task<IngestReply> ForwardAsync(IngestMessage message)
     {
-        if (message.Ping) return IngestReply.Ok();
-        if (!message.TryGetUri(out _)) return IngestReply.Rejected("Only http and https downloads are accepted.");
-
-        for (var attempt = 0; attempt < 2; attempt++)
+        // A ping asks whether Downlism is reachable, so it has to actually reach it. Answering
+        // yes without checking is worse than saying nothing: the extension reports "connected"
+        // while every download it hands over is dropped.
+        if (message.Ping)
         {
-            try
-            {
-                await using var pipe = IngestPipe.CreateClient();
-                await pipe.ConnectAsync((int)ConnectTimeout.TotalMilliseconds).ConfigureAwait(false);
-                await IngestPipe.WriteAsync(pipe, message, IngestJsonContext.Default.IngestMessage, CancellationToken.None)
-                    .ConfigureAwait(false);
-
-                var reply = await IngestPipe
-                    .ReadAsync(pipe, IngestJsonContext.Default.IngestReply, CancellationToken.None)
-                    .ConfigureAwait(false);
-
-                return reply ?? IngestReply.Ok();
-            }
-            catch (Exception exception) when (exception is TimeoutException or IOException)
-            {
-                // The app is not listening yet. Start it once, then try the pipe again.
-                if (attempt == 1 || !TryStartApp()) return IngestReply.Rejected("Downlism is not running.");
-                await Task.Delay(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
-            }
+            return await SendAsync(message, ProbeTimeout).ConfigureAwait(false)
+                ?? IngestReply.Rejected("Downlism is not running.");
         }
 
-        return IngestReply.Rejected("Downlism is not running.");
+        if (!message.TryGetUri(out _)) return IngestReply.Rejected("Only http and https downloads are accepted.");
+
+        // Try the running app first; only pay for a cold start when there is nothing listening.
+        var reply = await SendAsync(message, ProbeTimeout).ConfigureAwait(false);
+        if (reply is not null) return reply;
+
+        if (!TryStartApp()) return IngestReply.Rejected("Downlism is not running.");
+
+        return await SendAsync(message, StartupTimeout).ConfigureAwait(false)
+            ?? IngestReply.Rejected("Downlism did not start in time.");
+    }
+
+    /// <summary>Sends one message, returning null when nothing is listening.</summary>
+    private static async Task<IngestReply?> SendAsync(IngestMessage message, TimeSpan timeout)
+    {
+        try
+        {
+            await using var pipe = IngestPipe.CreateClient();
+            await pipe.ConnectAsync((int)timeout.TotalMilliseconds).ConfigureAwait(false);
+            await IngestPipe.WriteAsync(pipe, message, IngestJsonContext.Default.IngestMessage, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            return await IngestPipe
+                .ReadAsync(pipe, IngestJsonContext.Default.IngestReply, CancellationToken.None)
+                .ConfigureAwait(false) ?? IngestReply.Ok();
+        }
+        catch (Exception exception) when (exception is TimeoutException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

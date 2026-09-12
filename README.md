@@ -4,7 +4,7 @@
 <p align="center">多執行緒下載、斷點續傳，並接手 Chrome 與 Edge 的下載。</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.2.1-165674?style=flat-square" alt="Version 0.2.1" />
+  <img src="https://img.shields.io/badge/version-0.2.2-165674?style=flat-square" alt="Version 0.2.2" />
   <img src="https://img.shields.io/badge/Windows_11-26100%2B-0078D4?style=flat-square" alt="Windows 11 build 26100+" />
   <img src="https://img.shields.io/badge/WinUI-3-0078D4?style=flat-square" alt="WinUI 3" />
   <img src="https://img.shields.io/badge/.NET-10-512BD4?style=flat-square" alt=".NET 10" />
@@ -74,4 +74,4 @@ pwsh -File scripts/Publish-Installer.ps1
 
 需要 .NET SDK 10.0.401、Node.js（建置擴充功能）與 Windows 11 build 26100 以上。安裝程式產出在 `artifacts/installer/current`：最外層只有 `Downlism.Setup.exe`，其餘檔案在 `resources` 子資料夾，兩者必須一起保留。預設安裝到 `%LocalAppData%\Programs\Downlism`。
 
-`scripts/Smoke-Ui.ps1` 會啟動本機測試伺服器、實際跑一次下載並截圖；`scripts/Smoke-Restore.ps1` 重開程式，確認上一輪的下載有回來而且可以繼續；`scripts/Smoke-Tray.ps1` 確認關閉視窗只是隱藏、視窗叫得回來，以及 `--background` 啟動時不會跳出視窗。
+`scripts/Smoke-Ui.ps1` 會啟動本機測試伺服器、實際跑一次下載並截圖；`scripts/Smoke-Restore.ps1` 重開程式，確認上一輪的下載有回來而且可以繼續；`scripts/Smoke-Tray.ps1` 確認關閉視窗只是隱藏、視窗叫得回來，以及 `--background` 啟動時不會跳出視窗；`scripts/Smoke-Handover.ps1` 不經瀏覽器，直接用 Chrome 的 native messaging 封包格式餵給 `Downlism.Host.exe`，把「瀏覽器端」和「app 端」分開來判斷。

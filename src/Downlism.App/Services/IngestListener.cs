@@ -44,8 +44,28 @@ public sealed class IngestListener(DownloadQueue queue, Action<DownloadJob> onAc
             {
                 // A malformed or abandoned connection must not take the listener down with it.
             }
+            catch (Exception)
+            {
+                // Nothing else is allowed to end the loop either. A listener that dies here is
+                // invisible: the app keeps working, the browser keeps handing downloads over,
+                // and every one of them is silently refused. Pause briefly so a failure that
+                // repeats immediately cannot spin the CPU.
+                LastFailure = DateTimeOffset.UtcNow;
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
         }
     }
+
+    /// <summary>When the listener last failed for a reason it did not expect, if ever.</summary>
+    public DateTimeOffset? LastFailure { get; private set; }
 
     private IngestReply Accept(IngestMessage message)
     {

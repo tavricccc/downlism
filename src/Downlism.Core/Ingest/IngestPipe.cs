@@ -28,12 +28,16 @@ public static class IngestPipe
 
         security.AddAccessRule(new PipeAccessRule(user, PipeAccessRights.FullControl, AccessControlType.Allow));
 
+        // Not PipeOptions.CurrentUserOnly: that flag asks the framework to apply its own
+        // owner-only ACL and is rejected outright when a PipeSecurity is supplied. The rule
+        // above already limits the pipe to this user, and the client still verifies the
+        // server's owner through its own CurrentUserOnly.
         return NamedPipeServerStreamAcl.Create(
             Name,
             PipeDirection.InOut,
             NamedPipeServerStream.MaxAllowedServerInstances,
             PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly,
+            PipeOptions.Asynchronous,
             inBufferSize: 0,
             outBufferSize: 0,
             security);
