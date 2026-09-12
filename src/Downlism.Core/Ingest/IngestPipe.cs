@@ -20,7 +20,11 @@ public static class IngestPipe
     public const string Name = "Downlism.Ingest";
     private const int MaximumMessageBytes = 1024 * 1024;
 
-    public static NamedPipeServerStream CreateServer()
+    /// <param name="name">
+    /// Overridden only by tests. They must not share the production name: a running app owns
+    /// it, and a client would connect to that instead of to the server under test.
+    /// </param>
+    public static NamedPipeServerStream CreateServer(string? name = null)
     {
         var security = new PipeSecurity();
         var user = WindowsIdentity.GetCurrent().User
@@ -33,7 +37,7 @@ public static class IngestPipe
         // above already limits the pipe to this user, and the client still verifies the
         // server's owner through its own CurrentUserOnly.
         return NamedPipeServerStreamAcl.Create(
-            Name,
+            name ?? Name,
             PipeDirection.InOut,
             NamedPipeServerStream.MaxAllowedServerInstances,
             PipeTransmissionMode.Byte,
@@ -43,8 +47,8 @@ public static class IngestPipe
             security);
     }
 
-    public static NamedPipeClientStream CreateClient() =>
-        new(".", Name, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+    public static NamedPipeClientStream CreateClient(string? name = null) =>
+        new(".", name ?? Name, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 
     /// <summary>Writes a length-prefixed UTF-8 JSON message.</summary>
     public static async Task WriteAsync<T>(Stream stream, T value, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken)

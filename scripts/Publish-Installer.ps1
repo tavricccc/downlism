@@ -1,7 +1,7 @@
 # One version for the whole product: the installer is never released separately from the
 # app it installs, so a second number would only ever be a thing to keep in sync.
 param(
-    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.2.2'
+    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.2.3'
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -41,6 +41,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'npm install failed' }
         & npx tsc --noEmit
         if ($LASTEXITCODE -ne 0) { throw 'Extension typecheck failed' }
+        & npm test --silent
+        if ($LASTEXITCODE -ne 0) { throw 'Extension tests failed' }
         & node build.mjs
         if ($LASTEXITCODE -ne 0) { throw 'Extension build failed' }
     } finally {

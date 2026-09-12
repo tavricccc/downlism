@@ -5,7 +5,8 @@
   "description": "Hands Chrome and Edge downloads to Downlism.",
   "scripts": {
     "build": "node build.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsc -p tsconfig.test.json && node --test tests/links.test.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.268",

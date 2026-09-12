@@ -4,3 +4,4 @@ artifacts/
 extension/dist/
 node_modules/
 *.user
+dist-test/

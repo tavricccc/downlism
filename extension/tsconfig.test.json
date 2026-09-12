@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist-test",
+    "module": "ESNext",
+    "types": []
+  },
+  "include": ["src/links.ts"]
+}

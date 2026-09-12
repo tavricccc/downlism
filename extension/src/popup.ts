@@ -31,3 +31,7 @@ enabled.addEventListener("change", () => void save());
 minimum.addEventListener("change", () => void save());
 
 void refresh();
+
+// Declared a module so each entry point keeps its own scope; without this TypeScript treats
+// these files as one global script and the shared helper names collide.
+export {};

@@ -13,12 +13,19 @@ namespace Downlism.Tests;
 /// </remarks>
 public sealed class IngestPipeTests
 {
+    /// <summary>
+    /// A name of its own per test. The production name may be owned by a Downlism running on
+    /// this machine, and a client asking for it would reach that app instead of the server
+    /// under test.
+    /// </summary>
+    private static string UniqueName() => $"Downlism.Ingest.Test.{Guid.NewGuid():N}";
+
     [Fact]
     public void ServerCanBeCreated()
     {
         // A pipe the app cannot even open means no download is ever handed over, no matter
         // what the browser or the host do.
-        using var server = IngestPipe.CreateServer();
+        using var server = IngestPipe.CreateServer(UniqueName());
         Assert.NotNull(server);
     }
 
@@ -27,7 +34,9 @@ public sealed class IngestPipeTests
     {
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-        await using var server = IngestPipe.CreateServer();
+        var name = UniqueName();
+
+        await using var server = IngestPipe.CreateServer(name);
         var listening = Task.Run(async () =>
         {
             await server.WaitForConnectionAsync(cancellation.Token);
@@ -44,7 +53,7 @@ public sealed class IngestPipeTests
             return received;
         }, cancellation.Token);
 
-        await using var client = IngestPipe.CreateClient();
+        await using var client = IngestPipe.CreateClient(name);
         await client.ConnectAsync(5000, cancellation.Token);
 
         await IngestPipe.WriteAsync(

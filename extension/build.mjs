@@ -18,6 +18,17 @@ await build({
   sourcemap: false,
 });
 
+// A content script is injected as a classic script, not a module, so it cannot be ESM.
+await build({
+  entryPoints: ["src/content.ts"],
+  outdir,
+  bundle: true,
+  format: "iife",
+  target: "chrome120",
+  minify: false,
+  sourcemap: false,
+});
+
 for (const file of ["manifest.json", "popup.html", "icon128.png"]) {
   await cp(file, `${outdir}/${file}`).catch(() => {});
 }

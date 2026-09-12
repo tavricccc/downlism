@@ -1,12 +1,21 @@
 /**
- * Intercepts downloads and hands them to Downlism.
+ * Hands downloads to Downlism.
  *
- * Runs as an MV3 service worker, which the browser recycles after roughly thirty seconds of
+ * Two routes in, because MV3 has no way to block a response. The content script catches
+ * download links at the click, so the browser never opens the connection at all — that is the
+ * route that actually intercepts. Anything that starts some other way (a script, a redirect, a
+ * form post) only becomes visible once chrome.downloads reports it, and by then the response
+ * headers have arrived and bytes are in flight; those are cancelled as early as possible.
+ *
+ * Runs as a service worker, which the browser recycles after roughly thirty seconds of
  * idleness. Nothing here may assume it stays alive between downloads: there is no long-lived
- * native port, and all state lives in chrome.storage rather than in module scope.
+ * native port, and settings live in chrome.storage.
  */
 
 const HOST_NAME = "com.downlism.host";
+
+/** URLs handed back to the browser, which must not be taken over a second time. */
+const restoring = new Set<string>();
 
 interface Settings {
   enabled: boolean;
@@ -23,26 +32,26 @@ const DEFAULTS: Settings = {
   skipExtensions: ["pdf", "html", "htm", "txt", "svg", "json", "xml"],
 };
 
-async function loadSettings(): Promise<Settings> {
-  const stored = await chrome.storage.local.get(DEFAULTS);
-  return { ...DEFAULTS, ...stored } as Settings;
+/**
+ * The settings as of the last read, kept in memory so the download listener can decide
+ * synchronously. Awaiting chrome.storage inside that listener would mean more of the file
+ * arriving before the cancel lands, which is exactly what this is trying to avoid. The cache
+ * starts from the defaults after every worker restart, so at worst one download immediately
+ * after a cold start is judged by the defaults.
+ */
+let cached: Settings = { ...DEFAULTS };
+
+async function refreshSettings(): Promise<Settings> {
+  cached = { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) } as Settings;
+  return cached;
 }
+
+void refreshSettings();
+chrome.storage.onChanged.addListener(() => void refreshSettings());
 
 function extensionOf(filename: string): string {
   const dot = filename.lastIndexOf(".");
   return dot < 0 ? "" : filename.slice(dot + 1).toLowerCase();
-}
-
-function shouldIntercept(item: chrome.downloads.DownloadItem, settings: Settings): boolean {
-  if (!settings.enabled) return false;
-  if (!/^https?:/i.test(item.finalUrl || item.url)) return false;
-
-  // A negative size means the server did not declare one. Those are usually streams or
-  // generated files, and are left to the browser.
-  if (item.fileSize > 0 && item.fileSize < settings.minimumBytes) return false;
-  if (settings.skipExtensions.includes(extensionOf(item.filename || ""))) return false;
-
-  return true;
 }
 
 /**
@@ -58,15 +67,21 @@ async function cookieHeaderFor(url: string): Promise<string> {
   }
 }
 
-async function handOver(item: chrome.downloads.DownloadItem): Promise<boolean> {
-  const url = item.finalUrl || item.url;
+interface Handover {
+  url: string;
+  fileName?: string;
+  referrer?: string;
+  totalBytes?: number;
+}
+
+async function handOver(item: Handover): Promise<boolean> {
   const message = {
-    url,
-    fileName: item.filename ? item.filename.split(/[\\/]/).pop() : undefined,
-    referrer: item.referrer || undefined,
-    cookies: await cookieHeaderFor(url),
+    url: item.url,
+    fileName: item.fileName,
+    referrer: item.referrer,
+    cookies: await cookieHeaderFor(item.url),
     userAgent: navigator.userAgent,
-    totalBytes: item.fileSize > 0 ? item.fileSize : 0,
+    totalBytes: item.totalBytes ?? 0,
   };
 
   try {
@@ -85,28 +100,76 @@ async function notifyFailure(): Promise<void> {
   setTimeout(() => void chrome.action.setBadgeText({ text: "" }), 5000);
 }
 
+function shouldTakeOver(item: chrome.downloads.DownloadItem): boolean {
+  if (!cached.enabled) return false;
+  if (!/^https?:/i.test(item.finalUrl || item.url)) return false;
+
+  // A negative or zero size means the server did not declare one; those are judged on name
+  // alone rather than assumed to be small.
+  if (item.fileSize > 0 && item.fileSize < cached.minimumBytes) return false;
+  if (cached.skipExtensions.includes(extensionOf(item.filename || ""))) return false;
+
+  return true;
+}
+
 /**
- * onDeterminingFilename rather than onCreated: by this point the browser has followed
- * redirects and resolved the name and MIME type, which are exactly what decides whether the
- * download is worth taking over.
+ * The fallback route, for downloads that did not start from a link. onDeterminingFilename
+ * rather than onCreated: by this point the browser has followed redirects and resolved the
+ * name and MIME type, which are what decide whether the download is worth taking over.
  */
 chrome.downloads.onDeterminingFilename.addListener((item) => {
-  void (async () => {
-    const settings = await loadSettings();
-    if (!shouldIntercept(item, settings)) return;
+  // A download handed back to the browser must survive this listener, or cancelling and
+  // restarting it would loop forever.
+  if (restoring.delete(item.finalUrl || item.url)) return;
+  if (!shouldTakeOver(item)) return;
 
-    if (await handOver(item)) {
-      // Cancel only after Downlism has accepted it, so a failed handover still leaves the
-      // browser's own download running.
-      await chrome.downloads.cancel(item.id);
+  // Cancelled before anything is awaited, because every await is more of the file arriving.
+  void chrome.downloads.cancel(item.id);
+
+  void (async () => {
+    const url = item.finalUrl || item.url;
+    const fileName = item.filename ? item.filename.split(/[\\/]/).pop() : undefined;
+
+    if (await handOver({ url, fileName, referrer: item.referrer, totalBytes: item.fileSize })) {
       await chrome.downloads.erase({ id: item.id });
-    } else {
-      await notifyFailure();
+      return;
+    }
+
+    // Downlism did not take it, so give the download back rather than leaving the person with
+    // a cancelled entry and no file.
+    await notifyFailure();
+    await chrome.downloads.erase({ id: item.id });
+    restoring.add(url);
+    try {
+      await chrome.downloads.download({ url });
+    } catch {
+      // Nothing further to try; the badge already said so.
     }
   })();
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // The interception route: the content script has already stopped the click, so this only
+  // decides whether the download happens in Downlism or is replayed to the browser.
+  if (message?.type === "link") {
+    void (async () => {
+      if (!cached.enabled) {
+        sendResponse({ handled: false });
+        return;
+      }
+
+      const handled = await handOver({
+        url: message.url,
+        fileName: message.fileName,
+        referrer: message.referrer,
+      });
+
+      if (!handled) await notifyFailure();
+      sendResponse({ handled });
+    })();
+    return true;
+  }
+
   if (message?.type === "ping") {
     chrome.runtime
       .sendNativeMessage(HOST_NAME, { url: "", ping: true })
@@ -116,7 +179,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === "settings") {
-    loadSettings().then(sendResponse);
+    refreshSettings().then(sendResponse);
     return true;
   }
 
@@ -127,3 +190,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   return false;
 });
+
+// Declared a module so each entry point keeps its own scope; without this TypeScript treats
+// these files as one global script and the shared helper names collide.
+export {};
