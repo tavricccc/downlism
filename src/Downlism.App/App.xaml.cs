@@ -11,16 +11,21 @@ public partial class App : Application
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(nint window, int command);
 
+    private const int Hide = 0;
     private const int ShowNormal = 5;
     private const int Restore = 9;
 
+    private readonly LoginStartupService _loginStartup = new();
     private MainWindow? _window;
     private SingleInstanceGate? _instanceGate;
     private IngestListener? _ingest;
+    private TrayIcon? _tray;
+    private AppShutdownSignal? _shutdownSignal;
+    private bool _exiting;
 
     public App() => InitializeComponent();
 
-    /// <summary>The queue outlives any window, so a closed window does not abandon transfers.</summary>
+    /// <summary>The queue outlives any window, so closing the window does not abandon transfers.</summary>
     public static DownloadQueue Queue { get; } = new();
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
@@ -38,15 +43,40 @@ public partial class App : Application
         }
 
         _window = new MainWindow();
-        _window.Closed += (_, _) =>
+
+        // Closing the window hides it. Transfers continue, the browser can still hand new ones
+        // over, and the tray is where the app is actually quit.
+        _window.AppWindow.Closing += (_, closing) =>
         {
-            _ingest?.Dispose();
-            _instanceGate?.Dispose();
-            Queue.Dispose();
+            if (_exiting) return;
+            closing.Cancel = true;
+            ShowWindow(Handle, Hide);
         };
 
-        _window.Activate();
-        ShowWindow(WinRT.Interop.WindowNative.GetWindowHandle(_window), ShowNormal);
+        _tray = new TrayIcon { LaunchesAtLogin = _loginStartup.IsEnabled() };
+        _tray.ShowRequested += (_, _) => dispatcher.TryEnqueue(Raise);
+        _tray.PauseAllRequested += (_, _) => Queue.PauseAll();
+        _tray.LaunchAtLoginToggled += (_, _) => dispatcher.TryEnqueue(ToggleLaunchAtLogin);
+        _tray.ExitRequested += (_, _) => dispatcher.TryEnqueue(ExitApplication);
+
+        Queue.Changed += OnQueueChanged;
+
+        // Lets the installer ask this process to release its files before an update.
+        _shutdownSignal = new AppShutdownSignal(
+            Environment.ProcessId,
+            () => dispatcher.TryEnqueue(ExitApplication));
+
+        // Started by the Run key at sign-in: take the tray, leave the screen alone.
+        if (LoginStartupService.StartedInBackground())
+        {
+            _window.Activate();
+            ShowWindow(Handle, Hide);
+        }
+        else
+        {
+            _window.Activate();
+            ShowWindow(Handle, ShowNormal);
+        }
 
         // The listener starts after the window exists, so a download arriving during startup
         // has somewhere to appear.
@@ -54,11 +84,57 @@ public partial class App : Application
         _ingest.Start();
     }
 
+    private nint Handle => _window is null
+        ? 0
+        : WinRT.Interop.WindowNative.GetWindowHandle(_window);
+
+    private void OnQueueChanged(DownloadJob job)
+    {
+        if (_tray is null) return;
+
+        var active = Queue.Jobs.Where(entry => entry.State == DownloadState.Running).ToArray();
+        var speed = active.Sum(entry => entry.Progress?.BytesPerSecond ?? 0);
+        _tray.UpdateTooltip(active.Length, speed);
+    }
+
+    private void ToggleLaunchAtLogin()
+    {
+        if (_tray is null) return;
+
+        try
+        {
+            var enable = !_tray.LaunchesAtLogin;
+            _loginStartup.SetEnabled(enable);
+            _tray.LaunchesAtLogin = enable;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+        {
+            // The menu simply stays as it was; nothing here has a surface to report on.
+            _tray.LaunchesAtLogin = _loginStartup.IsEnabled();
+        }
+    }
+
     private void Raise()
     {
         if (_window is null) return;
 
-        ShowWindow(WinRT.Interop.WindowNative.GetWindowHandle(_window), Restore);
+        ShowWindow(Handle, Restore);
         _window.Activate();
+    }
+
+    private void ExitApplication()
+    {
+        if (_exiting) return;
+        _exiting = true;
+
+        Queue.Changed -= OnQueueChanged;
+        _ingest?.Dispose();
+        _shutdownSignal?.Dispose();
+        _tray?.Dispose();
+        Queue.Dispose();
+        _instanceGate?.Dispose();
+        _window?.Close();
+
+        Exit();
     }
 }
