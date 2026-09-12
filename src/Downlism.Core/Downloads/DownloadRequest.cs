@@ -5,7 +5,18 @@ public sealed record DownloadRequest
 {
     public required Uri Uri { get; init; }
 
+    /// <summary>
+    /// Where the file goes. When <see cref="SortIntoCategories"/> is set this is the root the
+    /// category folder is created under, not the final directory.
+    /// </summary>
     public required string Directory { get; init; }
+
+    /// <summary>
+    /// Place the file in a folder chosen from its type. Applied after the response resolves the
+    /// real name: a URL ending in .zip that serves a Content-Disposition of .exe belongs with
+    /// the programs, and deciding from the URL would file it with the archives.
+    /// </summary>
+    public bool SortIntoCategories { get; init; }
 
     /// <summary>Overrides the name derived from the response; null lets the probe decide.</summary>
     public string? FileName { get; init; }

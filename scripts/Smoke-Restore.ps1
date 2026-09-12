@@ -31,6 +31,10 @@ public static class RestoreWindow {
     [DllImport("user32.dll")] private static extern bool EnumWindows(Callback callback, IntPtr parameter);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr handle, StringBuilder title, int size);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr handle, StringBuilder name, int size);
+    // The tray host window carries the same title as the main window, so the class name is
+    // what separates them. Matching on title alone returns whichever the shell enumerates
+    // first, and the tray host has no UI beneath it.
     public static IntPtr Find(int processId) {
         IntPtr found = IntPtr.Zero;
         EnumWindows((handle, parameter) => {
@@ -38,7 +42,9 @@ public static class RestoreWindow {
             if (owner == processId) {
                 var title = new StringBuilder(256);
                 GetWindowText(handle, title, title.Capacity);
-                if (title.ToString() == "Downlism") { found = handle; return false; }
+                var cls = new StringBuilder(256);
+                GetClassName(handle, cls, cls.Capacity);
+                if (title.ToString() == "Downlism" && cls.ToString() != "DownlismTrayHost") { found = handle; return false; }
             }
             return true;
         }, IntPtr.Zero);
@@ -65,8 +71,16 @@ try {
             [void][RestoreWindow]::ShowWindow($handle, 5)
             [void][RestoreWindow]::SetForegroundWindow($handle)
         }
-        $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-            [System.Windows.Automation.TreeScope]::Children, $condition)
+        # Pick the automation element belonging to that exact window. The process owns several
+        # top-level windows, including the tray host, and FromHandle does not always return the
+        # element whose subtree holds the XAML content.
+        if ($handle -ne [IntPtr]::Zero) {
+            $candidates = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+                [System.Windows.Automation.TreeScope]::Children, $condition)
+            foreach ($candidate in $candidates) {
+                if ([IntPtr]$candidate.Current.NativeWindowHandle -eq $handle) { $window = $candidate; break }
+            }
+        }
         if ($window) { break }
     }
     if (!$window) { throw 'No app window found.' }

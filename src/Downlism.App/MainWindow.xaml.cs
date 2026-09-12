@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Downlism.App.Services;
 using Downlism.App.ViewModels;
 using Downlism.Core.Downloads;
+using Downlism.Core.Settings;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -16,6 +17,8 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<Guid, DownloadRowViewModel> _byId = [];
     private readonly DispatcherQueue _dispatcher;
     private readonly DownloadStore _store = new(DownloadStore.DefaultPath);
+    private AppSettings _settings = AppSettings.Load();
+    private string? _lastClipboardUrl;
     private long _bytesPerSecond;
 
     public MainWindow()
@@ -30,7 +33,17 @@ public sealed partial class MainWindow : Window
         AppWindow.SetIcon("Assets/Downlism.ico");
 
         App.Queue.Changed += OnJobChanged;
-        Closed += (_, _) => App.Queue.Changed -= OnJobChanged;
+        Closed += (_, _) =>
+        {
+            App.Queue.Changed -= OnJobChanged;
+            Clipboard.ContentChanged -= OnClipboardChanged;
+        };
+
+        _bytesPerSecond = _settings.BytesPerSecond;
+        SortIntoCategories.IsChecked = _settings.SortIntoCategories;
+        WatchClipboard.IsChecked = _settings.WatchClipboard;
+        App.Queue.Retry = new RetryPolicy(Math.Max(1, _settings.RetryAttempts));
+        if (_settings.WatchClipboard) Clipboard.ContentChanged += OnClipboardChanged;
 
         RestoreHistory();
         UpdateEmptyState();
@@ -54,6 +67,8 @@ public sealed partial class MainWindow : Window
                     Uri = uri,
                     Directory = stored.Directory,
                     FileName = stored.FileName,
+                    // Already the final directory; sorting again would nest a second folder.
+                    SortIntoCategories = false,
                     Referrer = stored.Referrer,
                 },
                 stored.State == "Completed" ? DownloadState.Completed : DownloadState.Paused,
@@ -131,12 +146,104 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        Track(App.Queue.Add(new DownloadRequest
+        Start(uri);
+    }
+
+    /// <summary>
+    /// Starts a download, choosing its folder from the file name so the Downloads folder does
+    /// not become the usual undifferentiated pile.
+    /// </summary>
+    private void Start(Uri uri) => Track(App.Queue.Add(new DownloadRequest
+    {
+        Uri = uri,
+        Directory = IngestListener.DownloadFolder(),
+        SortIntoCategories = _settings.SortIntoCategories,
+        Connections = _settings.Connections,
+        BytesPerSecond = _bytesPerSecond,
+    }));
+
+    /// <summary>Read by the ingest listener so browser handovers follow the same choices.</summary>
+    public AppSettings Settings => _settings;
+
+    private void WatchClipboardClick(object sender, RoutedEventArgs e)
+    {
+        var watch = WatchClipboard.IsChecked == true;
+        _settings = _settings with { WatchClipboard = watch };
+        _settings.Save();
+
+        Clipboard.ContentChanged -= OnClipboardChanged;
+        if (watch) Clipboard.ContentChanged += OnClipboardChanged;
+    }
+
+    private void SortIntoCategoriesClick(object sender, RoutedEventArgs e)
+    {
+        _settings = _settings with { SortIntoCategories = SortIntoCategories.IsChecked == true };
+        _settings.Save();
+    }
+
+    /// <summary>
+    /// Offers a copied link rather than starting it. Downloading whatever lands on the
+    /// clipboard would be a trap: people copy links to read them, to share them, to search
+    /// them. Asking costs one click and is never wrong.
+    /// </summary>
+    private async void OnClipboardChanged(object? sender, object e)
+    {
+        try
         {
-            Uri = uri,
-            Directory = IngestListener.DownloadFolder(),
-            BytesPerSecond = _bytesPerSecond,
-        }));
+            var content = Clipboard.GetContent();
+            if (!content.Contains(StandardDataFormats.Text)) return;
+
+            var text = (await content.GetTextAsync()).Trim();
+            if (text == _lastClipboardUrl) return;
+            if (!Uri.TryCreate(text, UriKind.Absolute, out var uri)) return;
+            if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return;
+
+            _lastClipboardUrl = text;
+            Offer(uri);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or ArgumentException)
+        {
+            // Another application was holding the clipboard; the next copy will work.
+        }
+    }
+
+    private void Offer(Uri uri)
+    {
+        var action = new Button { Content = "下載" };
+        action.Click += (_, _) =>
+        {
+            Notice.IsOpen = false;
+            Start(uri);
+        };
+
+        Notice.ActionButton = action;
+        Show($"剪貼簿裡有 {Downlism.Core.Http.SuggestedFileName.FromUri(uri)}", InfoBarSeverity.Informational);
+    }
+
+    private async void HashClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: Guid id } || !_byId.TryGetValue(id, out var row)) return;
+        if (row.Job.Path is not { } path || !File.Exists(path)) return;
+
+        Notice.ActionButton = null;
+        Show("正在計算 SHA-256…", InfoBarSeverity.Informational);
+
+        try
+        {
+            var hash = await FileHash.ComputeAsync(path, FileHash.Algorithm.Sha256);
+
+            // Copied rather than shown alone: the next thing anyone does with a checksum is
+            // compare it with one on a web page.
+            var package = new DataPackage();
+            package.SetText(hash);
+            Clipboard.SetContent(package);
+
+            Show($"SHA-256 已複製：{hash}", InfoBarSeverity.Success);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Show("無法讀取檔案來計算雜湊。", InfoBarSeverity.Error);
+        }
     }
 
     private void PauseAllClick(object sender, RoutedEventArgs e) => App.Queue.PauseAll();
@@ -163,6 +270,8 @@ public sealed partial class MainWindow : Window
         // Applies to transfers started from here on; changing the ceiling mid-flight would mean
         // tearing down connections that are already moving bytes.
         _bytesPerSecond = rate;
+        _settings = _settings with { BytesPerSecond = rate };
+        _settings.Save();
     }
 
     private static void WithId(object sender, Action<Guid> action)

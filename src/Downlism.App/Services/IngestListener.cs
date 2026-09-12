@@ -11,7 +11,10 @@ namespace Downlism.App.Services;
 /// may terminate at any moment, so a long-lived session would spend most of its life holding
 /// a dead pipe.
 /// </remarks>
-public sealed class IngestListener(DownloadQueue queue, Action<DownloadJob> onAccepted) : IDisposable
+public sealed class IngestListener(
+    DownloadQueue queue,
+    Action<DownloadJob> onAccepted,
+    Func<Core.Settings.AppSettings> settings) : IDisposable
 {
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _loop;
@@ -75,11 +78,18 @@ public sealed class IngestListener(DownloadQueue queue, Action<DownloadJob> onAc
         // rather than trusted because it came through a named pipe.
         if (!message.TryGetUri(out var uri)) return IngestReply.Rejected("Only http and https downloads are accepted.");
 
+        var current = settings();
+
         var job = queue.Add(new DownloadRequest
         {
             Uri = uri,
             Directory = DownloadFolder(),
+            // Browser handovers are sorted the same way as pasted links; a file arriving from
+            // Chrome should not land somewhere different from the same file pasted by hand.
+            SortIntoCategories = current.SortIntoCategories,
             FileName = string.IsNullOrWhiteSpace(message.FileName) ? null : message.FileName,
+            Connections = current.Connections,
+            BytesPerSecond = current.BytesPerSecond,
             Cookies = message.Cookies,
             Referrer = message.Referrer,
             UserAgent = message.UserAgent,

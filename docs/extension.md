@@ -27,13 +27,19 @@ Downlism 透過一個 MV3 擴充功能接管 Chrome 與 Edge 的下載。擴充�
 
 MV3 拿掉了可封鎖的 `webRequest`，所以擴充功能沒有辦法在回應階段擋下一個下載。等到 `chrome.downloads` 通報時，回應標頭已經到了、位元組已經在路上——在那裡取消，永遠會白下載一部分。
 
-因此攔截分成兩條路：
+因此攔截分成三條路，外加一個右鍵選單：
 
 **點擊攔截（content script）。** 在使用者按下下載連結的當下就 `preventDefault()`，Chrome 根本不會發出那個請求。這才是真正的「從頭攔截」，一個位元組都不會浪費。判斷刻意保守：只認 `download` 屬性，或副檔名明確不是網頁的那一類（zip、exe、iso、mp4……）。誤判會擋掉正常的頁面導覽，比漏接一個下載嚴重得多，判斷規則在 `src/links.ts`，由 `npm test` 覆蓋。
 
 Downlism 若沒接手，連結會被重新觸發一次交還給瀏覽器，使用者不會察覺中間發生過什麼。
 
-**取消路徑（service worker）。** 不是從連結開始的下載——JavaScript 觸發、表單送出、重新導向——只能在 `chrome.downloads.onDeterminingFilename` 看到。這條路徑會在**任何 `await` 之前**就先取消：每一次 `await` 都等於更多檔案落地，連讀一次設定的時間都足以寫入看得見的一塊。設定因此快取在記憶體裡，讓判斷能同步完成。
+**標頭預判（service worker）。** `webRequest.onHeadersReceived` 在回應標頭抵達時就看得到 `Content-Disposition`、`Content-Length`、`Content-Type`，當場決定要不要接手並記下網址；等 `chrome.downloads.onCreated` 通報時，取消是零延遲送出的。這是 Neat Download Manager 的做法，比在 downloads 事件裡才開始判斷嚴格更好——到那時候標頭早就沒了。決定會在 30 秒後過期，否則一個沒有產生下載的判斷會在很久以後誤殺另一個下載。
+
+**最後手段（service worker）。** 沒有任何標頭宣告的下載——重新導向鏈、blob、伺服器不送 `Content-Disposition`——只剩 `onDeterminingFilename` 看得到。這條會在**任何 `await` 之前**就先取消，設定因此快取在記憶體裡讓判斷同步完成。它排在最後，因為它一定會浪費一小段檔案。
+
+兩條 downloads 路徑都會跳過 `byExtensionId` 不為空的項目（那是擴充功能自己發起的，交還下載時就靠這個避免無限迴圈）以及已經有 `endTime` 的項目（那是歷史紀錄，不是新下載）。這兩個守則來自 AB Download Manager。
+
+**右鍵選單。** 「用 Downlism 下載」對連結、圖片、影片、音訊都能用，適合點擊攔截刻意放過的那些。
 
 ## 哪些下載會被接手
 

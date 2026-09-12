@@ -32,7 +32,11 @@
 
             <Button Grid.Column="1" Content="全部暫停" Click="PauseAllClick" AutomationProperties.Name="全部暫停" />
 
-            <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+                <CheckBox x:Name="SortIntoCategories" Content="分類存放" MinWidth="0"
+                          Click="SortIntoCategoriesClick" AutomationProperties.Name="分類存放" />
+                <CheckBox x:Name="WatchClipboard" Content="監看剪貼簿" MinWidth="0"
+                          Click="WatchClipboardClick" AutomationProperties.Name="監看剪貼簿" />
                 <TextBlock Text="速度上限" VerticalAlignment="Center"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 <ComboBox x:Name="SpeedLimit" MinWidth="124" SelectionChanged="SpeedLimitChanged"
@@ -118,6 +122,13 @@
                                             Style="{StaticResource RowActionButtonStyle}"
                                             AutomationProperties.Name="繼續" ToolTipService.ToolTip="繼續">
                                         <FontIcon FontSize="14" Glyph="&#xE768;" />
+                                    </Button>
+                                    <Button Click="HashClick" Tag="{x:Bind Id}"
+                                            Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(IsFinished), Mode=OneWay}"
+                                            Style="{StaticResource RowActionButtonStyle}"
+                                            AutomationProperties.Name="計算 SHA-256"
+                                            ToolTipService.ToolTip="計算 SHA-256 並複製">
+                                        <TextBlock Text="SHA" FontSize="11" />
                                     </Button>
                                     <Button Click="OpenFolderClick" Tag="{x:Bind Id}"
                                             Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(IsFinished), Mode=OneWay}"

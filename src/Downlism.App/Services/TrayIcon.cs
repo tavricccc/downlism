@@ -22,6 +22,8 @@ public sealed class TrayIcon : IDisposable
     private const uint FlagMessage = 0x00000001;
     private const uint FlagIcon = 0x00000002;
     private const uint FlagTip = 0x00000004;
+    private const uint FlagInfo = 0x00000010;
+    private const uint InfoIconInfo = 0x00000001;
     private const uint IconVersion4 = 4;
     private const uint RightButtonUp = 0x0205;
     private const uint ContextMenu = 0x007B;
@@ -83,6 +85,29 @@ public sealed class TrayIcon : IDisposable
         NativeMethods.Shell_NotifyIconW(NotifyModify, ref _iconData);
     }
 
+    /// <summary>
+    /// Shows a balloon. Used only for finishing and failing: a notification for anything that
+    /// happens routinely is one people learn to dismiss without reading.
+    /// </summary>
+    public void Announce(string title, string message)
+    {
+        if (!_added) return;
+
+        _iconData.Flags = FlagMessage | FlagIcon | FlagTip | FlagInfo;
+        _iconData.InfoTitle = Trim(title, 63);
+        _iconData.Info = Trim(message, 255);
+        _iconData.InfoFlags = InfoIconInfo;
+        NativeMethods.Shell_NotifyIconW(NotifyModify, ref _iconData);
+
+        // Cleared afterwards so the next tooltip update does not raise the balloon again.
+        _iconData.Flags = FlagMessage | FlagIcon | FlagTip;
+        _iconData.InfoTitle = string.Empty;
+        _iconData.Info = string.Empty;
+    }
+
+    private static string Trim(string value, int limit) =>
+        value.Length <= limit ? value : value[..(limit - 1)] + "…";
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -129,6 +154,8 @@ public sealed class TrayIcon : IDisposable
             CallbackMessage = CallbackMessage,
             IconHandle = _icon.Handle,
             Tip = "Downlism",
+            Info = string.Empty,
+            InfoTitle = string.Empty,
             VersionOrTimeout = IconVersion4,
         };
 

@@ -29,8 +29,9 @@ public sealed class DownloadEngine(HttpClient client)
         // stream, while the bytes that must reach disk are the decoded ones.
         var segmented = probe.SupportsRanges && !probe.IsEncoded && probe.TotalLength is > 0;
         var fileName = request.FileName ?? probe.FileName;
+        var directory = DownloadCategory.DirectoryFor(request.Directory, fileName, request.SortIntoCategories);
 
-        using var target = DownloadTarget.Open(request.Directory, fileName, probe.TotalLength, resume: segmented);
+        using var target = DownloadTarget.Open(directory, fileName, probe.TotalLength, resume: segmented);
 
         var statePath = SegmentStateFile.PathFor(target.PartialPath);
         var state = segmented ? OpenOrCreateState(statePath, probe, request.Connections) : null;

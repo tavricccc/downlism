@@ -138,6 +138,45 @@ public sealed class DownloadEngineTests : IDisposable
     }
 
     [Fact]
+    public async Task SortsIntoACategoryFolderUsingTheResolvedName()
+    {
+        // The URL says .zip and the response says .exe. The category has to follow the response,
+        // because that is what the file on disk will actually be.
+        await using var server = new TestHttpServer(Payload(4096))
+        {
+            ContentDisposition = "attachment; filename=\"setup.exe\"",
+        };
+
+        var result = await new DownloadEngine(_client).RunAsync(
+            new DownloadRequest
+            {
+                Uri = new Uri($"http://127.0.0.1:{server.Port}/bundle.zip"),
+                Directory = _directory,
+                SortIntoCategories = true,
+            },
+            progress: null,
+            CancellationToken.None);
+
+        Assert.Equal(Path.Combine(_directory, "程式", "setup.exe"), result.Path);
+    }
+
+    [Fact]
+    public async Task KeepsTheFileInTheRootWhenSortingIsOff()
+    {
+        await using var server = new TestHttpServer(Payload(4096))
+        {
+            ContentDisposition = "attachment; filename=\"clip.mp4\"",
+        };
+
+        var result = await new DownloadEngine(_client).RunAsync(
+            new DownloadRequest { Uri = server.Uri, Directory = _directory, SortIntoCategories = false },
+            progress: null,
+            CancellationToken.None);
+
+        Assert.Equal(Path.Combine(_directory, "clip.mp4"), result.Path);
+    }
+
+    [Fact]
     public async Task KeepsBothFilesWhenTheNameIsAlreadyTaken()
     {
         await using var server = new TestHttpServer(Payload(4096));

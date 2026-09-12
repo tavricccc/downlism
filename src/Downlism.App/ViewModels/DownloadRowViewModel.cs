@@ -67,6 +67,7 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
         {
             DownloadState.Completed => "completed",
             DownloadState.Failed => "failed",
+            DownloadState.Retrying => "failed",
             DownloadState.Paused => "paused",
             _ => "running",
         };
@@ -74,14 +75,17 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
         Status = job.State switch
         {
             DownloadState.Queued => "排隊中",
-            DownloadState.Running => job.Request.Uri.Host,
+            DownloadState.Running => job.Attempt > 1
+                ? $"{job.Request.Uri.Host}（第 {job.Attempt} 次嘗試）"
+                : job.Request.Uri.Host,
+            DownloadState.Retrying => $"{job.Error ?? "連線中斷"} 稍後自動重試",
             DownloadState.Paused => "已暫停",
             DownloadState.Completed => "已完成",
             DownloadState.Failed => job.Error ?? "下載失敗",
             _ => "",
         };
 
-        CanPause = job.State is DownloadState.Running or DownloadState.Queued;
+        CanPause = job.State is DownloadState.Running or DownloadState.Queued or DownloadState.Retrying;
         CanResume = job.State is DownloadState.Paused or DownloadState.Failed;
         IsFinished = job.State == DownloadState.Completed;
     }

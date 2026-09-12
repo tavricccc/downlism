@@ -80,7 +80,7 @@ public partial class App : Application
 
         // The listener starts after the window exists, so a download arriving during startup
         // has somewhere to appear.
-        _ingest = new IngestListener(Queue, _window.AddFromBrowser);
+        _ingest = new IngestListener(Queue, _window.AddFromBrowser, () => _window!.Settings);
         _ingest.Start();
     }
 
@@ -95,7 +95,21 @@ public partial class App : Application
         var active = Queue.Jobs.Where(entry => entry.State == DownloadState.Running).ToArray();
         var speed = active.Sum(entry => entry.Progress?.BytesPerSecond ?? 0);
         _tray.UpdateTooltip(active.Length, speed);
+
+        // Told once, when it finishes. The whole point of leaving the window closed is not
+        // having to watch it.
+        if (job.State == DownloadState.Completed && _announced.Add(job.Id))
+        {
+            _tray.Announce("下載完成", job.FileName);
+        }
+        else if (job.State == DownloadState.Failed && _announced.Add(job.Id))
+        {
+            _tray.Announce("下載失敗", $"{job.FileName}：{job.Error}");
+        }
     }
+
+    /// <summary>Jobs already announced, so a later state change does not repeat the balloon.</summary>
+    private readonly HashSet<Guid> _announced = [];
 
     private void ToggleLaunchAtLogin()
     {

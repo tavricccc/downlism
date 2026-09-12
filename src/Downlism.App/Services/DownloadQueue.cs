@@ -20,6 +20,9 @@ public sealed class DownloadQueue : IDisposable
 
     public DownloadQueue(int concurrentDownloads = 3) => _slots = new SemaphoreSlim(concurrentDownloads, concurrentDownloads);
 
+    /// <summary>How a transfer that fails for a transient reason is retried.</summary>
+    public RetryPolicy Retry { get; set; } = RetryPolicy.Default;
+
     /// <summary>Raised on a background thread whenever a transfer changes state.</summary>
     public event Action<DownloadJob>? Changed;
 
@@ -61,7 +64,8 @@ public sealed class DownloadQueue : IDisposable
     {
         if (request.FileName is null) return null;
 
-        var partial = Path.Combine(request.Directory, request.FileName) + DownloadTarget.PartialExtension;
+        var directory = DownloadCategory.DirectoryFor(request.Directory, request.FileName, request.SortIntoCategories);
+        var partial = Path.Combine(directory, request.FileName) + DownloadTarget.PartialExtension;
 
         try
         {
@@ -145,21 +149,41 @@ public sealed class DownloadQueue : IDisposable
 
         try
         {
-            job.State = DownloadState.Running;
-            job.Error = null;
-            Changed?.Invoke(job);
-
             var progress = new Progress<DownloadProgress>(sample =>
             {
                 job.Progress = sample;
                 Changed?.Invoke(job);
             });
 
-            var result = await new DownloadEngine(_client).RunAsync(job.Request, progress, token).ConfigureAwait(false);
+            for (var attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    job.State = DownloadState.Running;
+                    job.Attempt = attempt;
+                    job.Error = null;
+                    Changed?.Invoke(job);
 
-            job.Path = result.Path;
-            job.State = DownloadState.Completed;
-            Changed?.Invoke(job);
+                    var result = await new DownloadEngine(_client)
+                        .RunAsync(job.Request, progress, token)
+                        .ConfigureAwait(false);
+
+                    job.Path = result.Path;
+                    job.State = DownloadState.Completed;
+                    Changed?.Invoke(job);
+                    return;
+                }
+                catch (Exception exception) when (Retry.ShouldRetry(exception, attempt) && !token.IsCancellationRequested)
+                {
+                    // The partial file and its sidecar are still on disk, so the next attempt
+                    // resumes rather than starting the transfer again.
+                    job.Error = Describe(exception);
+                    job.State = DownloadState.Retrying;
+                    Changed?.Invoke(job);
+
+                    await Task.Delay(Retry.DelayBefore(attempt), token).ConfigureAwait(false);
+                }
+            }
         }
         catch (OperationCanceledException)
         {
@@ -225,6 +249,7 @@ public enum DownloadState
 {
     Queued,
     Running,
+    Retrying,
     Paused,
     Completed,
     Failed,
@@ -250,4 +275,7 @@ public sealed class DownloadJob(Guid id, DownloadRequest request)
 
     /// <summary>Distinguishes a cancellation the user asked for from one caused by a failure.</summary>
     public bool Paused { get; set; }
+
+    /// <summary>Which attempt is running, counting from one.</summary>
+    public int Attempt { get; set; } = 1;
 }

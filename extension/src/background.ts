@@ -1,21 +1,24 @@
 /**
  * Hands downloads to Downlism.
  *
- * Two routes in, because MV3 has no way to block a response. The content script catches
- * download links at the click, so the browser never opens the connection at all — that is the
- * route that actually intercepts. Anything that starts some other way (a script, a redirect, a
- * form post) only becomes visible once chrome.downloads reports it, and by then the response
- * headers have arrived and bytes are in flight; those are cancelled as early as possible.
+ * Three routes in, because MV3 has no way to block a response.
+ *
+ *  1. The content script catches download links at the click, so the browser never opens the
+ *     connection at all. This is the only route that intercepts rather than cancels.
+ *  2. webRequest watches response headers and decides in advance; when chrome.downloads then
+ *     reports the download, the cancel is already decided and lands with nothing awaited in
+ *     between. This is how Neat Download Manager does it, and it beats deciding inside the
+ *     downloads listener, where the headers are long gone and every asynchronous step is more
+ *     of the file written to disk.
+ *  3. onDeterminingFilename, for downloads no response header announced.
+ *
+ * Plus a context menu, for links the click route deliberately leaves alone.
  *
  * Runs as a service worker, which the browser recycles after roughly thirty seconds of
- * idleness. Nothing here may assume it stays alive between downloads: there is no long-lived
- * native port, and settings live in chrome.storage.
+ * idleness. Nothing here may assume it stays alive between downloads.
  */
 
 const HOST_NAME = "com.downlism.host";
-
-/** URLs handed back to the browser, which must not be taken over a second time. */
-const restoring = new Set<string>();
 
 interface Settings {
   enabled: boolean;
@@ -33,11 +36,9 @@ const DEFAULTS: Settings = {
 };
 
 /**
- * The settings as of the last read, kept in memory so the download listener can decide
- * synchronously. Awaiting chrome.storage inside that listener would mean more of the file
- * arriving before the cancel lands, which is exactly what this is trying to avoid. The cache
- * starts from the defaults after every worker restart, so at worst one download immediately
- * after a cold start is judged by the defaults.
+ * The settings as of the last read, kept in memory so the download listeners can decide
+ * synchronously. The cache starts from the defaults after every worker restart, so at worst
+ * one download immediately after a cold start is judged by the defaults.
  */
 let cached: Settings = { ...DEFAULTS };
 
@@ -49,9 +50,46 @@ async function refreshSettings(): Promise<Settings> {
 void refreshSettings();
 chrome.storage.onChanged.addListener(() => void refreshSettings());
 
+/**
+ * URLs the header watcher has handed to Downlism, waiting for the matching download entry to
+ * appear so it can be cancelled at once. Decisions expire: one that never produced a download
+ * would otherwise cancel an unrelated download much later.
+ */
+const decided = new Map<string, number>();
+const DECISION_LIFETIME = 30_000;
+
+function takeDecision(url: string): boolean {
+  const at = decided.get(url);
+  if (at === undefined) return false;
+
+  decided.delete(url);
+  return Date.now() - at < DECISION_LIFETIME;
+}
+
+function headerValue(headers: chrome.webRequest.HttpHeader[] | undefined, name: string): string {
+  const found = headers?.find((header) => header.name.toLowerCase() === name);
+  return found?.value ?? "";
+}
+
 function extensionOf(filename: string): string {
-  const dot = filename.lastIndexOf(".");
-  return dot < 0 ? "" : filename.slice(dot + 1).toLowerCase();
+  const clean = filename.split(/[?#]/)[0];
+  const dot = clean.lastIndexOf(".");
+  return dot < 0 ? "" : clean.slice(dot + 1).toLowerCase();
+}
+
+/** Pulls the filename out of a Content-Disposition value, RFC 5987 form first. */
+function nameFromDisposition(value: string): string | undefined {
+  const extended = /filename\*\s*=\s*[^']*'[^']*'([^;]+)/i.exec(value);
+  if (extended) {
+    try {
+      return decodeURIComponent(extended[1].trim());
+    } catch {
+      // Fall through to the plain form.
+    }
+  }
+
+  const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(value);
+  return plain ? plain[1].trim() : undefined;
 }
 
 /**
@@ -100,30 +138,67 @@ async function notifyFailure(): Promise<void> {
   setTimeout(() => void chrome.action.setBadgeText({ text: "" }), 5000);
 }
 
-function shouldTakeOver(item: chrome.downloads.DownloadItem): boolean {
-  if (!cached.enabled) return false;
-  if (!/^https?:/i.test(item.finalUrl || item.url)) return false;
+/**
+ * Route 2: watch response headers and decide before the download exists.
+ *
+ * Not blocking — Chrome's MV3 removed that, so this only observes. What it buys is the
+ * decision itself: Content-Disposition, Content-Length and Content-Type are all here, and all
+ * gone by the time chrome.downloads reports anything.
+ */
+chrome.webRequest.onHeadersReceived.addListener(
+  (details) => {
+    if (!cached.enabled || details.method !== "GET") return;
 
-  // A negative or zero size means the server did not declare one; those are judged on name
-  // alone rather than assumed to be small.
-  if (item.fileSize > 0 && item.fileSize < cached.minimumBytes) return false;
-  if (cached.skipExtensions.includes(extensionOf(item.filename || ""))) return false;
+    const disposition = headerValue(details.responseHeaders, "content-disposition");
+    if (!/attachment/i.test(disposition)) return;
 
-  return true;
-}
+    const fileName = nameFromDisposition(disposition);
+    if (fileName && cached.skipExtensions.includes(extensionOf(fileName))) return;
+
+    const length = Number(headerValue(details.responseHeaders, "content-length")) || 0;
+    if (length > 0 && length < cached.minimumBytes) return;
+
+    decided.set(details.url, Date.now());
+    void (async () => {
+      if (await handOver({ url: details.url, fileName, referrer: details.initiator, totalBytes: length })) return;
+
+      // Downlism refused it, so let the browser keep the download it already started.
+      decided.delete(details.url);
+      await notifyFailure();
+    })();
+  },
+  { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame", "xmlhttprequest", "other"] },
+  ["responseHeaders"],
+);
 
 /**
- * The fallback route, for downloads that did not start from a link. onDeterminingFilename
- * rather than onCreated: by this point the browser has followed redirects and resolved the
- * name and MIME type, which are what decide whether the download is worth taking over.
+ * Cancels the download route 2 already decided on. Nothing is awaited before the cancel,
+ * because every await is more of the file arriving.
+ */
+chrome.downloads.onCreated.addListener((item) => {
+  // Downloads this extension started must never be taken over, or restoring one would loop.
+  if (item.byExtensionId) return;
+  // A restored history entry is not a new download.
+  if (item.endTime) return;
+
+  if (!takeDecision(item.finalUrl || item.url)) return;
+
+  void chrome.downloads.cancel(item.id);
+  void chrome.downloads.erase({ id: item.id });
+});
+
+/**
+ * Route 3, the last resort: a redirect chain, a blob, a server that sends no
+ * Content-Disposition. Later than route 2 and it wastes a little of the file, which is why it
+ * runs last.
  */
 chrome.downloads.onDeterminingFilename.addListener((item) => {
-  // A download handed back to the browser must survive this listener, or cancelling and
-  // restarting it would loop forever.
-  if (restoring.delete(item.finalUrl || item.url)) return;
-  if (!shouldTakeOver(item)) return;
+  if (item.byExtensionId || item.endTime) return;
+  if (!cached.enabled) return;
+  if (!/^https?:/i.test(item.finalUrl || item.url)) return;
+  if (item.fileSize > 0 && item.fileSize < cached.minimumBytes) return;
+  if (cached.skipExtensions.includes(extensionOf(item.filename || ""))) return;
 
-  // Cancelled before anything is awaited, because every await is more of the file arriving.
   void chrome.downloads.cancel(item.id);
 
   void (async () => {
@@ -135,11 +210,10 @@ chrome.downloads.onDeterminingFilename.addListener((item) => {
       return;
     }
 
-    // Downlism did not take it, so give the download back rather than leaving the person with
-    // a cancelled entry and no file.
+    // Hand the download back rather than leaving the person with a cancelled entry and no
+    // file. The restarted one carries byExtensionId, so the guards above let it through.
     await notifyFailure();
     await chrome.downloads.erase({ id: item.id });
-    restoring.add(url);
     try {
       await chrome.downloads.download({ url });
     } catch {
@@ -148,9 +222,29 @@ chrome.downloads.onDeterminingFilename.addListener((item) => {
   })();
 });
 
+/** A way to take any link, including the ones the click route deliberately leaves alone. */
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: "downlism-link",
+      title: "用 Downlism 下載",
+      contexts: ["link", "image", "video", "audio"],
+    });
+  });
+});
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  const url = info.linkUrl || info.srcUrl;
+  if (!url || !/^https?:/i.test(url)) return;
+
+  void (async () => {
+    if (!(await handOver({ url, referrer: info.pageUrl || tab?.url }))) await notifyFailure();
+  })();
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  // The interception route: the content script has already stopped the click, so this only
-  // decides whether the download happens in Downlism or is replayed to the browser.
+  // Route 1: the content script has already stopped the click, so this only decides whether
+  // the download happens in Downlism or is replayed to the browser.
   if (message?.type === "link") {
     void (async () => {
       if (!cached.enabled) {

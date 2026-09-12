@@ -33,6 +33,10 @@ public static class SmokeWindow {
     [DllImport("user32.dll")] private static extern bool EnumWindows(Callback callback, IntPtr parameter);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr handle, StringBuilder title, int size);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr handle, StringBuilder name, int size);
+    // The tray host window carries the same title as the main window, so the class name is
+    // what separates them. Matching on title alone returns whichever the shell enumerates
+    // first, and the tray host has no UI beneath it.
     public static IntPtr Find(int processId) {
         IntPtr found = IntPtr.Zero;
         EnumWindows((handle, parameter) => {
@@ -40,7 +44,9 @@ public static class SmokeWindow {
             if (owner == processId) {
                 var title = new StringBuilder(256);
                 GetWindowText(handle, title, title.Capacity);
-                if (title.ToString() == "Downlism") { found = handle; return false; }
+                var cls = new StringBuilder(256);
+                GetClassName(handle, cls, cls.Capacity);
+                if (title.ToString() == "Downlism" && cls.ToString() != "DownlismTrayHost") { found = handle; return false; }
             }
             return true;
         }, IntPtr.Zero);
@@ -81,7 +87,13 @@ function Invoke-Named([System.Windows.Automation.AutomationElement]$Window, [str
         (New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
             [System.Windows.Automation.ControlType]::Button))))
-    $element = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+    # The tree is still filling in for a moment after the window appears, so this waits rather
+    # than failing on a race that has nothing to do with what is being tested.
+    $element = $null
+    for ($attempt = 0; $attempt -lt 40 -and !$element; $attempt++) {
+        $element = $Window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+        if (!$element) { Start-Sleep -Milliseconds 250 }
+    }
     if (!$element) { throw "No button named $Name" }
     $element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
@@ -109,8 +121,16 @@ try {
             [void][SmokeWindow]::ShowWindow($handle, 5)
             [void][SmokeWindow]::SetForegroundWindow($handle)
         }
-        $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-            [System.Windows.Automation.TreeScope]::Children, $condition)
+        # Pick the automation element belonging to that exact window. The process owns several
+        # top-level windows, including the tray host, and FromHandle does not always return the
+        # element whose subtree holds the XAML content.
+        if ($handle -ne [IntPtr]::Zero) {
+            $candidates = [System.Windows.Automation.AutomationElement]::RootElement.FindAll(
+                [System.Windows.Automation.TreeScope]::Children, $condition)
+            foreach ($candidate in $candidates) {
+                if ([IntPtr]$candidate.Current.NativeWindowHandle -eq $handle) { $window = $candidate; break }
+            }
+        }
         if ($window) { break }
     }
     if (!$window) { throw 'No app window found.' }
