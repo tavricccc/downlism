@@ -44,6 +44,23 @@ public partial class App : Application
 
         _window = new MainWindow();
 
+        // The installer launches the first run with this switch. The extension cannot install
+        // itself, and the minute after installing is the only minute anyone is willing to
+        // follow four steps in chrome://extensions. Requested before the window is activated,
+        // because the window only promises to honour it while it is still unshown.
+        if (LoginStartupService.StartedForExtensionGuide())
+        {
+            _window.ShowExtensionGuideOnFirstFrame();
+
+            // Turned on once, on the launch that follows a fresh install. The extension hands
+            // downloads to whatever is listening, so a Downlism that is not running after a
+            // reboot quietly gives every download back to the browser -- which looks like the
+            // app failing rather than like a setting nobody switched on. Visible and
+            // reversible in both the tray menu and the settings flyout.
+            EnableLoginStartupQuietly();
+            _window.RefreshLaunchAtLogin();
+        }
+
         // Closing the window hides it. Transfers continue, the browser can still hand new ones
         // over, and the tray is where the app is actually quit.
         _window.AppWindow.Closing += (_, closing) =>
@@ -58,6 +75,10 @@ public partial class App : Application
         _tray.PauseAllRequested += (_, _) => Queue.PauseAll();
         _tray.LaunchAtLoginToggled += (_, _) => dispatcher.TryEnqueue(ToggleLaunchAtLogin);
         _tray.ExitRequested += (_, _) => dispatcher.TryEnqueue(ExitApplication);
+
+        // The same switch exists in the settings flyout; whichever one is used, the other has
+        // to stop showing the old answer.
+        _window.LaunchAtLoginChanged += (_, _) => _tray.LaunchesAtLogin = _loginStartup.IsEnabled();
 
         Queue.Changed += OnQueueChanged;
 
@@ -80,8 +101,9 @@ public partial class App : Application
 
         // The listener starts after the window exists, so a download arriving during startup
         // has somewhere to appear.
-        _ingest = new IngestListener(Queue, _window.AddFromBrowser, () => _window!.Settings);
+        _ingest = new IngestListener(_window.AddFromBrowser, () => _window!.Settings);
         _ingest.Start();
+
     }
 
     private nint Handle => _window is null
@@ -96,13 +118,9 @@ public partial class App : Application
         var speed = active.Sum(entry => entry.Progress?.BytesPerSecond ?? 0);
         _tray.UpdateTooltip(active.Length, speed);
 
-        // Told once, when it finishes. The whole point of leaving the window closed is not
-        // having to watch it.
-        if (job.State == DownloadState.Completed && _announced.Add(job.Id))
-        {
-            _tray.Announce("下載完成", job.FileName);
-        }
-        else if (job.State == DownloadState.Failed && _announced.Add(job.Id))
+        // The download window remains open through download and completion (like IDM),
+        // so completion does not pop up a system notification.
+        if (job.State == DownloadState.Failed && _announced.Add(job.Id))
         {
             _tray.Announce("下載失敗", $"{job.FileName}：{job.Error}");
         }
@@ -110,6 +128,18 @@ public partial class App : Application
 
     /// <summary>Jobs already announced, so a later state change does not repeat the balloon.</summary>
     private readonly HashSet<Guid> _announced = [];
+
+    private void EnableLoginStartupQuietly()
+    {
+        try
+        {
+            _loginStartup.SetEnabled(true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+        {
+            // A first run that cannot write the Run key is still a perfectly good first run.
+        }
+    }
 
     private void ToggleLaunchAtLogin()
     {
@@ -120,6 +150,7 @@ public partial class App : Application
             var enable = !_tray.LaunchesAtLogin;
             _loginStartup.SetEnabled(enable);
             _tray.LaunchesAtLogin = enable;
+            _window?.RefreshLaunchAtLogin();
         }
         catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
         {

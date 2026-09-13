@@ -5,6 +5,16 @@ public sealed record DownloadRequest
 {
     public required Uri Uri { get; init; }
 
+    /// <summary>Which engine runs this transfer. Defaults to plain segmented HTTP.</summary>
+    public TransferKind Kind { get; init; } = TransferKind.Http;
+
+    /// <summary>
+    /// The page the media was found on, kept for media transfers. yt-dlp needs a referrer for
+    /// manifests that are only served to their own player, and the page is also the only
+    /// readable name a bare .m3u8 URL ever has.
+    /// </summary>
+    public string? PageUrl { get; init; }
+
     /// <summary>
     /// Where the file goes. When <see cref="SortIntoCategories"/> is set this is the root the
     /// category folder is created under, not the final directory.
@@ -45,7 +55,8 @@ public sealed record DownloadProgress(
     long CompletedBytes,
     long? TotalBytes,
     double BytesPerSecond,
-    IReadOnlyList<Segment> Segments)
+    IReadOnlyList<Segment> Segments,
+    string? Note = null)
 {
     public double? Fraction => TotalBytes is > 0 ? Math.Clamp((double)CompletedBytes / TotalBytes.Value, 0, 1) : null;
 

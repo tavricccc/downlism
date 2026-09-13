@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <Version Condition="'$(AppVersion)' != ''">$(AppVersion)</Version>
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.26100.0</TargetPlatformMinVersion>
@@ -9,5 +9,12 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
+  </PropertyGroup>
+  <!-- Released builds ship without symbols. A .pdb beside the assembly hands a decompiler the
+       original line numbers and local variable names, and none of that helps anyone who is
+       running the installer rather than building it. Debug builds keep theirs. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 </Project>

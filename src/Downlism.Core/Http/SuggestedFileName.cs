@@ -43,6 +43,14 @@ public static class SuggestedFileName
     /// <summary>Falls back to the last path segment of the final (post-redirect) URL.</summary>
     public static string FromUri(Uri uri)
     {
+        // A magnet link has no path at all. Its display name is the only readable thing in it,
+        // and a row labelled with a forty-character info hash is worse than one labelled
+        // "download".
+        if (uri.Scheme == Downloads.TransferRouting.MagnetScheme)
+        {
+            return Sanitize(Downloads.TransferRouting.NameFromMagnet(uri) ?? Fallback);
+        }
+
         var path = uri.AbsolutePath;
         var lastSlash = path.LastIndexOf('/');
         var segment = lastSlash >= 0 ? path[(lastSlash + 1)..] : path;

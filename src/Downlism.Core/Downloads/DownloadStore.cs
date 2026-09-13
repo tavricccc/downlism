@@ -11,7 +11,9 @@ public sealed record StoredDownload(
     string? Referrer,
     string State,
     string? Path,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    TransferKind Kind = TransferKind.Http,
+    string? PageUrl = null);
 
 /// <summary>
 /// The list of downloads, kept across restarts.
@@ -51,6 +53,28 @@ public sealed class DownloadStore
             );
             """;
         command.ExecuteNonQuery();
+
+        AddColumnIfMissing(connection, "kind");
+        AddColumnIfMissing(connection, "page_url");
+    }
+
+    /// <summary>
+    /// Widens an existing table in place. A database written by 0.3 has neither column, and
+    /// recreating the table would throw away the list a person already has.
+    /// </summary>
+    private static void AddColumnIfMissing(SqliteConnection connection, string column)
+    {
+        using var existing = connection.CreateCommand();
+        existing.CommandText = "SELECT COUNT(*) FROM pragma_table_info('downloads') WHERE name = $name;";
+        existing.Parameters.AddWithValue("$name", column);
+
+        if (Convert.ToInt64(existing.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0) return;
+
+        using var add = connection.CreateCommand();
+        // The column name is one of two literals chosen in this file, never anything a caller
+        // supplies, so interpolating it cannot be turned into an injection.
+        add.CommandText = $"ALTER TABLE downloads ADD COLUMN {column} TEXT;";
+        add.ExecuteNonQuery();
     }
 
     public static string DefaultPath => System.IO.Path.Combine(
@@ -63,8 +87,10 @@ public sealed class DownloadStore
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO downloads (id, url, directory, file_name, referrer, state, path, created_at)
-            VALUES ($id, $url, $directory, $fileName, $referrer, $state, $path, $createdAt)
+            INSERT INTO downloads
+                (id, url, directory, file_name, referrer, state, path, created_at, kind, page_url)
+            VALUES
+                ($id, $url, $directory, $fileName, $referrer, $state, $path, $createdAt, $kind, $pageUrl)
             ON CONFLICT(id) DO UPDATE SET state = excluded.state, path = excluded.path;
             """;
 
@@ -76,6 +102,8 @@ public sealed class DownloadStore
         command.Parameters.AddWithValue("$state", download.State);
         command.Parameters.AddWithValue("$path", (object?)download.Path ?? DBNull.Value);
         command.Parameters.AddWithValue("$createdAt", download.CreatedAt.ToString("O"));
+        command.Parameters.AddWithValue("$kind", download.Kind.ToString());
+        command.Parameters.AddWithValue("$pageUrl", (object?)download.PageUrl ?? DBNull.Value);
         command.ExecuteNonQuery();
     }
 
@@ -94,7 +122,7 @@ public sealed class DownloadStore
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, url, directory, file_name, referrer, state, path, created_at
+            SELECT id, url, directory, file_name, referrer, state, path, created_at, kind, page_url
             FROM downloads ORDER BY created_at DESC LIMIT 500;
             """;
 
@@ -112,7 +140,11 @@ public sealed class DownloadStore
                 reader.IsDBNull(4) ? null : reader.GetString(4),
                 reader.GetString(5),
                 reader.IsDBNull(6) ? null : reader.GetString(6),
-                DateTimeOffset.TryParse(reader.GetString(7), out var created) ? created : DateTimeOffset.MinValue));
+                DateTimeOffset.TryParse(reader.GetString(7), out var created) ? created : DateTimeOffset.MinValue,
+                !reader.IsDBNull(8) && Enum.TryParse<TransferKind>(reader.GetString(8), out var kind)
+                    ? kind
+                    : TransferKind.Http,
+                reader.IsDBNull(9) ? null : reader.GetString(9)));
         }
 
         return results;

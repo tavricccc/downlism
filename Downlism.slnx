@@ -11,6 +11,9 @@
     <Project Path="src/Downlism.Setup/Downlism.Setup.csproj">
       <Platform Project="x64" />
     </Project>
+    <Project Path="src/Downlism.Uninstall/Downlism.Uninstall.csproj">
+      <Platform Project="x64" />
+    </Project>
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Downlism.Tests/Downlism.Tests.csproj" />

@@ -13,12 +13,17 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Command bar. Two actions and one setting: everything else belongs on a row. -->
+        <!-- Command bar. Three actions on the left, and on the right the two things that are
+             not about one transfer: the browser it is fed from, and the settings that apply to
+             every transfer. The settings used to sit out here in a row that grew one control
+             per release and would not have survived another. -->
         <Grid Padding="20,16,20,14" ColumnSpacing="10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
@@ -30,23 +35,92 @@
                 </StackPanel>
             </Button>
 
-            <Button Grid.Column="1" Content="全部暫停" Click="PauseAllClick" AutomationProperties.Name="全部暫停" />
+            <Button Grid.Column="1" Click="PasteMediaClick" AutomationProperties.Name="貼上影片頁面"
+                    ToolTipService.ToolTip="把剪貼簿裡的頁面網址交給 yt-dlp">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontSize="14" Glyph="&#xE714;" />
+                    <TextBlock Text="貼上影片頁面" />
+                </StackPanel>
+            </Button>
 
-            <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
-                <CheckBox x:Name="SortIntoCategories" Content="分類存放" MinWidth="0"
-                          Click="SortIntoCategoriesClick" AutomationProperties.Name="分類存放" />
-                <CheckBox x:Name="WatchClipboard" Content="監看剪貼簿" MinWidth="0"
-                          Click="WatchClipboardClick" AutomationProperties.Name="監看剪貼簿" />
-                <TextBlock Text="速度上限" VerticalAlignment="Center"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <ComboBox x:Name="SpeedLimit" MinWidth="124" SelectionChanged="SpeedLimitChanged"
-                          AutomationProperties.Name="速度上限">
-                    <ComboBoxItem Content="不限制" Tag="0" IsSelected="True" />
-                    <ComboBoxItem Content="1 MB/s" Tag="1048576" />
-                    <ComboBoxItem Content="5 MB/s" Tag="5242880" />
-                    <ComboBoxItem Content="20 MB/s" Tag="20971520" />
-                </ComboBox>
-            </StackPanel>
+            <Button Grid.Column="2" Content="全部暫停" Click="PauseAllClick" AutomationProperties.Name="全部暫停" />
+
+            <Button Grid.Column="4" Click="ExtensionGuideClick" AutomationProperties.Name="瀏覽器擴充功能"
+                    ToolTipService.ToolTip="怎麼把擴充功能裝進 Chrome 或 Edge">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontSize="14" Glyph="&#xE774;" />
+                    <TextBlock Text="瀏覽器擴充功能" />
+                </StackPanel>
+            </Button>
+
+            <Button Grid.Column="5" AutomationProperties.Name="設定" ToolTipService.ToolTip="設定">
+                <FontIcon FontSize="14" Glyph="&#xE713;" />
+                <Button.Flyout>
+                    <Flyout Placement="BottomEdgeAlignedRight">
+                        <!-- Numbers first, switches after: the three drop-downs are what people
+                             come here to change, and the switches are set once and forgotten. -->
+                        <StackPanel Spacing="14" Width="304">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="分段連線數" />
+                                <TextBlock Text="每個下載同時開幾條連線。影片下載用同樣的數字同時抓片段；BitTorrent 自己管理節點，不受這裡影響。"
+                                           TextWrapping="Wrap" FontSize="11.5"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <ComboBox x:Name="Connections" HorizontalAlignment="Stretch"
+                                          SelectionChanged="ConnectionsChanged"
+                                          AutomationProperties.Name="分段連線數">
+                                    <ComboBoxItem Content="1 條（不分段）" Tag="1" />
+                                    <ComboBoxItem Content="2 條" Tag="2" />
+                                    <ComboBoxItem Content="4 條" Tag="4" />
+                                    <ComboBoxItem Content="8 條" Tag="8" />
+                                    <ComboBoxItem Content="16 條" Tag="16" />
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="同時下載數" />
+                                <TextBlock Text="超過的排隊等候。開太多只會讓每一個都變慢。"
+                                           TextWrapping="Wrap" FontSize="11.5"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <ComboBox x:Name="ConcurrentDownloads" HorizontalAlignment="Stretch"
+                                          SelectionChanged="ConcurrentDownloadsChanged"
+                                          AutomationProperties.Name="同時下載數">
+                                    <ComboBoxItem Content="1 個" Tag="1" />
+                                    <ComboBoxItem Content="2 個" Tag="2" />
+                                    <ComboBoxItem Content="3 個" Tag="3" />
+                                    <ComboBoxItem Content="5 個" Tag="5" />
+                                    <ComboBoxItem Content="8 個" Tag="8" />
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="速度上限" />
+                                <ComboBox x:Name="SpeedLimit" HorizontalAlignment="Stretch"
+                                          SelectionChanged="SpeedLimitChanged"
+                                          AutomationProperties.Name="速度上限">
+                                    <ComboBoxItem Content="不限制" Tag="0" />
+                                    <ComboBoxItem Content="1 MB/s" Tag="1048576" />
+                                    <ComboBoxItem Content="5 MB/s" Tag="5242880" />
+                                    <ComboBoxItem Content="20 MB/s" Tag="20971520" />
+                                </ComboBox>
+                            </StackPanel>
+
+                            <Border BorderThickness="0,1,0,0" Margin="0,2,0,0"
+                                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                            <StackPanel Spacing="10">
+                                <CheckBox x:Name="LaunchAtLogin" Content="開機時在背景啟動" MinWidth="0"
+                                          Click="LaunchAtLoginClick" AutomationProperties.Name="開機時在背景啟動" />
+                                <CheckBox x:Name="SortIntoCategories" Content="依類型分類存放" MinWidth="0"
+                                          Click="SortIntoCategoriesClick" AutomationProperties.Name="依類型分類存放" />
+                                <CheckBox x:Name="WatchClipboard" Content="監看剪貼簿" MinWidth="0"
+                                          Click="WatchClipboardClick" AutomationProperties.Name="監看剪貼簿" />
+                                <CheckBox x:Name="AskOnCapture" Content="瀏覽器接手前先問" MinWidth="0"
+                                          Click="AskOnCaptureClick" AutomationProperties.Name="瀏覽器接手前先問" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Flyout>
+                </Button.Flyout>
+            </Button>
         </Grid>
 
         <!-- An empty list is an invitation, not a shrug. -->
@@ -58,7 +132,7 @@
                        Style="{ThemeResource SubtitleTextBlockStyle}" />
             <TextBlock TextWrapping="Wrap" TextAlignment="Center"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                       Text="複製一個下載連結後按上方的貼上網址，或在 Chrome、Edge 裝上 Downlism 擴充功能，之後的下載就會自動交給這裡。" />
+                       Text="複製下載連結、影片頁面網址或磁力連結，再按上方的貼上按鈕。裝上 Chrome、Edge 的 Downlism 擴充功能後，網頁上的影片也會被找出來，交給這裡下載。" />
         </StackPanel>
 
         <ListView x:Name="Downloads" Grid.Row="1" SelectionMode="None"
@@ -97,8 +171,19 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
-                                <TextBlock Text="{x:Bind FileName}" TextTrimming="CharacterEllipsis"
-                                           VerticalAlignment="Center" ToolTipService.ToolTip="{x:Bind FileName}" />
+                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <!-- Two characters, not an icon: "影片" and "BT" say what
+                                         engine is running without a legend to look up. -->
+                                    <Border Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(HasKindLabel)}"
+                                            Background="{ThemeResource ControlAltFillColorSecondaryBrush}"
+                                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                                            BorderThickness="1" CornerRadius="4" Padding="5,1">
+                                        <TextBlock Text="{x:Bind KindLabel}" FontSize="10.5"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </Border>
+                                    <TextBlock Text="{x:Bind FileName, Mode=OneWay}" TextTrimming="CharacterEllipsis"
+                                               ToolTipService.ToolTip="{x:Bind FileName, Mode=OneWay}" />
+                                </StackPanel>
 
                                 <TextBlock Grid.Column="1" Text="{x:Bind Size, Mode=OneWay}"
                                            HorizontalAlignment="Right" VerticalAlignment="Center"

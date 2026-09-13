@@ -72,6 +72,12 @@ public sealed class InstallationService
             {
                 CreateShortcut(StartShortcut, target);
                 if (desktop) CreateShortcut(DesktopLink, target);
+                var setupExe = Path.Combine(target, "Downlism.Setup.exe");
+                var uninstallExe = Path.Combine(target, "Uninstall.exe");
+                if (File.Exists(setupExe))
+                {
+                    try { File.Copy(setupExe, uninstallExe, true); } catch { }
+                }
                 using var key = Registry.CurrentUser.CreateSubKey(UninstallKey);
                 key.SetValue("DisplayName", "Downlism");
                 key.SetValue("DisplayVersion", manifest.Version);
@@ -119,8 +125,6 @@ public sealed class InstallationService
         if (!Path.GetFileName(target).Equals("Downlism", StringComparison.OrdinalIgnoreCase))
             throw new IOException("安裝位置不符，已停止解除安裝。");
         InstallFiles.ReadManifest(target);
-        if (string.Equals(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory), target, StringComparison.OrdinalIgnoreCase))
-            throw new IOException("請從 Windows「已安裝的應用程式」啟動解除安裝。");
         InstalledAppShutdown.Stop(target);
         using (var run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
         {

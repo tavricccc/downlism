@@ -1,10 +1,10 @@
 <p align="center"><img src="docs/assets/downlism-icon-fluent.png" width="96" height="96" alt="Downlism" /></p>
 
 <h1 align="center">Downlism</h1>
-<p align="center">多執行緒下載、斷點續傳，並接手 Chrome 與 Edge 的下載。</p>
+<p align="center">多執行緒下載、斷點續傳、影片嗅探與 BitTorrent，並接手 Chrome 與 Edge 的下載。</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.3.0-165674?style=flat-square" alt="Version 0.3.0" />
+  <img src="https://img.shields.io/badge/version-0.4.0-165674?style=flat-square" alt="Version 0.4.0" />
   <img src="https://img.shields.io/badge/Windows_11-26100%2B-0078D4?style=flat-square" alt="Windows 11 build 26100+" />
   <img src="https://img.shields.io/badge/WinUI-3-0078D4?style=flat-square" alt="WinUI 3" />
   <img src="https://img.shields.io/badge/.NET-10-512BD4?style=flat-square" alt=".NET 10" />
@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/status-preview-D97706?style=flat-square" alt="Preview" />
 </p>
 
-Downlism 把一個檔案切成多段、用多條連線同時下載，中斷後從原處接回去。它是獨立產品，與 [Flowlism](https://github.com/tavricccc/flowlism) 啟動器、[Peeklism](https://github.com/tavricccc/peeklism) 預覽工具分開安裝、分開更新；三者共用同一套視覺語言（WinUI 3、Mica、Fluent），但不共用行程，也沒有互相依賴。
+Downlism 把一個檔案切成多段、用多條連線同時下載，中斷後從原處接回去。網頁上播放的影片會被找出來交給 yt-dlp，磁力連結與種子檔則走內建的 BitTorrent。它是獨立產品，與 [Flowlism](https://github.com/tavricccc/flowlism) 啟動器、[Peeklism](https://github.com/tavricccc/peeklism) 預覽工具分開安裝、分開更新；三者共用同一套視覺語言（WinUI 3、Mica、Fluent），但不共用行程，也沒有互相依賴。
 
 ## 介面
 
@@ -35,8 +35,74 @@ Downlism 把一個檔案切成多段、用多條連線同時下載，中斷後�
 | 瀏覽器擴充功能與 Native Messaging Host（Chrome、Edge） | 完成 |
 | 安裝程式與瀏覽器登記 | 完成 |
 | 系統匣常駐與開機自啟 | 完成 |
+| 影片嗅探（HLS／DASH／直接檔案） | 完成 |
+| 影片下載（yt-dlp + ffmpeg，首次使用時取得） | 完成 |
+| BitTorrent（磁力連結、.torrent、DHT） | 完成 |
+| 每個下載的確認視窗（檔名、資料夾、稍後下載） | 完成 |
+| 設定面板（分段連線數、同時下載數、速度上限） | 完成 |
+| 擴充功能安裝教學（安裝後自動出現） | 完成 |
 | Firefox 擴充功能 | 未開始（見下） |
-| 影片嗅探（HLS／DASH） | 未開始 |
+
+## 三種引擎，一份介面
+
+下載一個檔案、下載一段影片、下載一個種子，底下幾乎沒有共通之處：分段 HTTP 自己寫位元組範圍，影片交給 yt-dlp，BitTorrent 跑一整個 swarm。但上面的一切是共通的——佇列、同時下載數、重試策略、那一列、暫停與繼續、關機前的保存、完成通知，還有那條分段進度條。
+
+分段進度條在 BitTorrent 上反而最貼切。swarm 是東一塊西一塊把檔案填起來的，這正是這個控制項當初要畫的東西：畫面上被分成十六段，每一段對應真實的片段範圍，依 bitfield 填色。影片則是一段影像流加一段聲音流，兩段依序填滿，最後合併——這也是 yt-dlp 真正在做的事。
+
+**影片嗅探只看得到該看的。** 一個影片頁面會發出數百個請求，把它們全列出來等於沒有列：唯一有用的那一筆會被埋在數千個 `.ts` 片段、縮圖與廣告底下。擴充功能只收 manifest 與夠大的完整檔案，片段一律丟掉。
+
+**YouTube 這類網站只交頁面網址，不交嗅探到的串流。** 那些網址是簽章過、會過期、分段取用的，單獨拿出來下載不會成功。能下載的只有頁面，而 yt-dlp 認得一千多個網站的頁面。
+
+**做種在完成的瞬間停止。** 繼續上傳是關於別人的頻寬、在某些地方還關於法律風險的決定，不是一個下載管理員可以自己開始做的事。上傳速率仍保留 256 KB/s 上限而非歸零——多數 swarm 會餓死完全不回饋的節點，完全不上傳反而讓下載本身變慢。
+
+**yt-dlp 與 ffmpeg 不打包進安裝程式，第一次用到時才取得。** 光是 ffmpeg 就比 Downlism 其餘部分加起來還大，而且兩者的授權都得逐版本追蹤。放進 `%LocalAppData%\Downlism\tools`，超過兩週會在背景換新的——取流規則每週在變，一份放著不動的 yt-dlp 一個月後就會在熱門網站上失效。
+
+## 一個安裝程式
+
+`artifacts/installer/Downlism.Setup.exe`，163 MB，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
+
+| 裝到機器上的是 | 大小 | 需要什麼 |
+| --- | --- | --- |
+| **共用版型** | 122 MB | 機器上登錄一份共用的 Windows App 執行環境 |
+| **自帶版型** | 194 MB | 什麼都不需要，所有東西都在安裝資料夾裡 |
+
+共用版型的 WinUI 來自 Windows 集中保管的 MSIX framework package，整台機器只有一份，Flowlism 與 Peeklism 指向同一份。
+
+**兩種版型放在同一個檔案裡也沒有變成兩倍大。** 自帶版型就是共用版型加上那套 SDK 二進位檔，兩邊逐檔比對雜湊後相同的 270 個檔案只存一份。
+
+**元件包在安裝程式裡，不用連網。** 共用的是它們最後放在哪裡，不是它們從哪裡來。安裝程式在最需要能動的那一刻不依賴網路，也就少一件會失敗的事。
+
+**不需要系統管理員，也不需要開發人員模式。** 執行環境套件是微軟簽章的 Store 元件，跟 sideload 未簽章 App 是兩回事；微軟的安裝程式只有「替全機所有使用者佈建」那一步要提權，失敗時自動退回只替目前使用者註冊，而 Downlism 本來就是單一使用者安裝。
+
+**拒絕或失敗都不再是死路。** 安裝程式先偵測；已經登錄過就直接用共用版型，什麼都不問。沒有才詢問，而回答「否」、或機器根本不允許登錄共用元件時，它改裝自帶版型繼續走完——需要哪一版這件事，沒有人應該在發現自己需要另一版之前就知道。
+
+**升級會自動換版型。** 舊的自帶版型更新成共用版型時，安裝紀錄裡不再存在的檔案會被移除，那 145 MB 的 SDK 就此離開。這不只是省空間：`Microsoft.UI.Xaml.dll` 留在執行檔旁邊會贏過共用套件，程式會繼續載入舊的那一份而完全忽略新的。
+
+## 設定
+
+齒輪按鈕後面有三個數字和四個開關。
+
+**分段連線數**是每個下載同時開幾條連線，預設八條。影片下載用同一個數字同時抓片段；BitTorrent 不受影響，它自己管理節點。**同時下載數**是超過就排隊的那個門檻，預設三個——二十個下載各開八條連線，是一百六十條連線搶同一條上行，每一個都會晚完成。
+
+這三個數字以前都存在設定檔裡卻沒有任何地方可以改，同時下載數甚至根本沒有被套用。
+
+**開機時在背景啟動**寫的是目前使用者的 Run 機碼，帶 `--background` 啟動，只進系統匣不開視窗。這個開關同時出現在系統匣選單裡，兩邊改的是同一個機碼，任一邊改了另一邊立刻跟上。全新安裝後的第一次啟動會自動打開它：擴充功能把下載交給正在聽的那個程式，開機後沒在跑的 Downlism 會讓重開機後的第一個下載安靜地回到瀏覽器手上——那看起來像程式壞了，而不是像有個開關沒開。解除安裝會把機碼一併移除。
+
+## 擴充功能安裝教學
+
+擴充功能沒辦法自己裝。Chrome 只接受從開發人員模式的資料夾選取器載入未封裝的擴充功能，那是四個步驟，而且在一個沒有人會主動去的頁面裡。
+
+所以安裝完成後直接跳出來：四個編號步驟、兩顆可以直接開啟 Chrome 或 Edge 擴充功能頁的按鈕，以及唯一沒有人背得起來的那一項——資料夾路徑——旁邊放了複製與開啟。之後在主視窗按「瀏覽器擴充功能」可以再看一次。
+
+## 接手時的那個小視窗
+
+瀏覽器把下載交過來時，跳出來的是一個只有四行的視窗：檔名、來源、大小、存到哪裡，加上「開始下載」「稍後下載」「取消」。
+
+把整個清單視窗拉到最前面只為了講一句話，等於用一千像素蓋住對方正在讀的東西。這個視窗問的是之後就問不了的三件事——叫什麼、放哪裡、現在要不要開始；一旦開始了，清單那一列才是該看的地方，而那個清單可以一直關著。
+
+視窗高度是量出來的，不是寫死的。磁力連結的來源會折成兩行、貼上的網址只有一行、瀏覽器接手時頁尾還多一個核取方塊；任何固定高度都會在其中幾種情況下把按鈕切掉。
+
+不想每次都被問的人，在那個視窗裡勾一次就好；要問回來，主視窗上有「接手前先問」。
 
 ## 幾個刻意的決定
 
@@ -82,6 +148,6 @@ dotnet test Downlism.slnx
 pwsh -File scripts/Publish-Installer.ps1
 ```
 
-需要 .NET SDK 10.0.401、Node.js（建置擴充功能）與 Windows 11 build 26100 以上。安裝程式產出在 `artifacts/installer/current`：最外層只有 `Downlism.Setup.exe`，其餘檔案在 `resources` 子資料夾，兩者必須一起保留。預設安裝到 `%LocalAppData%\Programs\Downlism`。
+需要 .NET SDK 10.0.401、Node.js（建置擴充功能）與 Windows 11 build 26100 以上。安裝程式產出在 `artifacts/installer/Downlism.Setup.exe`，就那一個檔案，複製走就能用。預設安裝到 `%LocalAppData%\Programs\Downlism`。上一版會移到 `artifacts/installer/history`。
 
 `scripts/Smoke-Ui.ps1` 會啟動本機測試伺服器、實際跑一次下載並截圖；`scripts/Smoke-Restore.ps1` 重開程式，確認上一輪的下載有回來而且可以繼續；`scripts/Smoke-Tray.ps1` 確認關閉視窗只是隱藏、視窗叫得回來，以及 `--background` 啟動時不會跳出視窗；`scripts/Smoke-Handover.ps1` 不經瀏覽器，直接用 Chrome 的 native messaging 封包格式餵給 `Downlism.Host.exe`，把「瀏覽器端」和「app 端」分開來判斷。

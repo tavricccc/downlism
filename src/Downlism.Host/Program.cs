@@ -106,7 +106,7 @@ internal static class Program
         {
             using var process = Process.Start(new ProcessStartInfo(path)
             {
-                UseShellExecute = false,
+                UseShellExecute = true,
                 WorkingDirectory = AppContext.BaseDirectory,
             });
 

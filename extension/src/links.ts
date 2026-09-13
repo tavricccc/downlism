@@ -11,8 +11,17 @@
 export const DOWNLOAD_EXTENSIONS: ReadonlySet<string> = new Set([
   "7z", "apk", "appimage", "bin", "bz2", "deb", "dmg", "exe", "flac", "gz", "img", "iso",
   "jar", "m4a", "mkv", "mov", "mp3", "mp4", "msi", "msix", "pkg", "rar", "rpm", "tar",
-  "tgz", "wav", "webm", "whl", "xz", "zip", "zst",
+  "tgz", "torrent", "wav", "webm", "whl", "xz", "zip", "zst",
 ]);
+
+/**
+ * A magnet link is the one non-http scheme worth intercepting. Left to the browser it opens
+ * whatever torrent client is registered, or nothing at all — and clicking it is already an
+ * unambiguous statement that the person wants the thing downloaded.
+ */
+export function isMagnet(href: string): boolean {
+  return /^magnet:\?/i.test(href.trim());
+}
 
 export function extensionOfPath(pathname: string): string {
   const name = pathname.slice(pathname.lastIndexOf("/") + 1);
@@ -21,6 +30,8 @@ export function extensionOfPath(pathname: string): string {
 }
 
 export function isDownloadUrl(href: string, base?: string): boolean {
+  if (isMagnet(href)) return true;
+
   let url: URL;
   try {
     url = new URL(href, base);
@@ -37,6 +48,8 @@ export function isDownloadUrl(href: string, base?: string): boolean {
  * stating outright that the link saves a file, which outranks any guess made from the name.
  */
 export function looksLikeADownload(href: string, hasDownloadAttribute: boolean, base?: string): boolean {
+  if (isMagnet(href)) return true;
+
   let url: URL;
   try {
     url = new URL(href, base);

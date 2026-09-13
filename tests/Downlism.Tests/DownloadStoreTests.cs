@@ -34,6 +34,85 @@ public sealed class DownloadStoreTests : IDisposable
     }
 
     [Fact]
+    public void RemembersWhichEngineATransferBelongsTo()
+    {
+        // Without this a restored magnet link would be restarted by the HTTP engine, which
+        // cannot open a magnet at all, and the row would fail the moment it was resumed.
+        var torrent = new StoredDownload(
+            Guid.NewGuid(),
+            "magnet:?xt=urn:btih:0123456789abcdef&dn=debian.iso",
+            @"C:\Downloads",
+            "debian.iso",
+            Referrer: null,
+            State: "Paused",
+            Path: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Kind: TransferKind.Torrent);
+
+        _store.Save(torrent);
+
+        var loaded = Assert.Single(_store.Load());
+        Assert.Equal(TransferKind.Torrent, loaded.Kind);
+    }
+
+    [Fact]
+    public void RemembersThePageAVideoCameFrom()
+    {
+        var media = new StoredDownload(
+            Guid.NewGuid(),
+            "https://cdn.example.com/vod/master.m3u8",
+            @"C:\Downloads",
+            "講座",
+            Referrer: null,
+            State: "Paused",
+            Path: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Kind: TransferKind.Media,
+            PageUrl: "https://example.com/lecture/7");
+
+        _store.Save(media);
+
+        var loaded = Assert.Single(_store.Load());
+        Assert.Equal(TransferKind.Media, loaded.Kind);
+        Assert.Equal("https://example.com/lecture/7", loaded.PageUrl);
+    }
+
+    [Fact]
+    public void ReadsADatabaseWrittenBeforeTheKindColumnExisted()
+    {
+        // A person upgrading from 0.3 has a table with eight columns. Recreating it would be
+        // simpler and would throw away the list they already have.
+        var path = Path.Combine(_directory, "legacy.db");
+
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path}"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE downloads (
+                    id          TEXT PRIMARY KEY,
+                    url         TEXT NOT NULL,
+                    directory   TEXT NOT NULL,
+                    file_name   TEXT NOT NULL,
+                    referrer    TEXT,
+                    state       TEXT NOT NULL,
+                    path        TEXT,
+                    created_at  TEXT NOT NULL
+                );
+                INSERT INTO downloads VALUES
+                    ('0123456789abcdef0123456789abcdef', 'https://example.com/old.zip',
+                     'C:\Downloads', 'old.zip', NULL, 'Completed', NULL, '2026-01-01T00:00:00+00:00');
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var loaded = Assert.Single(new DownloadStore(path).Load());
+        Assert.Equal("old.zip", loaded.FileName);
+        Assert.Equal(TransferKind.Http, loaded.Kind);
+        Assert.Null(loaded.PageUrl);
+    }
+
+    [Fact]
     public void UpdatingStateDoesNotCreateASecondRow()
     {
         var download = Sample("b.zip");

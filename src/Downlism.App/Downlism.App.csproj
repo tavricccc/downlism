@@ -9,7 +9,12 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
-    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <!-- Framework-dependent WinUI: the Windows App SDK comes from the shared MSIX framework
+         package that the bootstrap launcher deploys, not from a copy inside every install.
+         Three lism apps each carrying their own 145 MB of it is three copies on disk and,
+         when more than one is open, three copies of the same code pages in memory. .NET
+         itself stays self-contained — that one has no installer we are willing to chain. -->
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
     <EnableMsixTooling>true</EnableMsixTooling>
     <!-- Ships its own runtime. Without this the published app demands a matching .NET Desktop
          Runtime on the target machine, which is not something a download manager should make

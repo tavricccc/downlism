@@ -6,7 +6,7 @@ using Downlism.Core.Http;
 namespace Downlism.Core.Downloads;
 
 /// <summary>Runs one transfer from probe to published file.</summary>
-public sealed class DownloadEngine(HttpClient client)
+public sealed class DownloadEngine(HttpClient client) : ITransferEngine
 {
     private const int BufferSize = 128 * 1024;
     private const long CheckpointInterval = 1024 * 1024;

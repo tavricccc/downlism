@@ -30,23 +30,50 @@ public sealed record IngestMessage
     [JsonPropertyName("totalBytes")]
     public long TotalBytes { get; init; }
 
+    /// <summary>
+    /// Which engine the extension believes this belongs to: <c>file</c>, <c>media</c> or
+    /// <c>torrent</c>. Only ever narrows what the URL alone would have decided, and anything
+    /// unrecognised falls back to that decision.
+    /// </summary>
+    [JsonPropertyName("kind")]
+    public string? Kind { get; init; }
+
+    /// <summary>
+    /// The page a sniffed stream was found on. A bare manifest URL is often useless on its
+    /// own — the page is what yt-dlp can resolve into a title and a format list.
+    /// </summary>
+    [JsonPropertyName("pageUrl")]
+    public string? PageUrl { get; init; }
+
     /// <summary>True when the browser is only asking whether Downlism is running.</summary>
     [JsonPropertyName("ping")]
     public bool Ping { get; init; }
 
-    public bool TryGetUri(out Uri uri)
-    {
-        // http and https only. A file:// or javascript: URL arriving over this channel would
-        // turn the extension into a way to make Downlism read local files on a page's behalf.
-        if (Uri.TryCreate(Url, UriKind.Absolute, out var parsed)
-            && (parsed.Scheme == Uri.UriSchemeHttp || parsed.Scheme == Uri.UriSchemeHttps))
-        {
-            uri = parsed;
-            return true;
-        }
+    /// <summary>
+    /// http, https and magnet only. A file:// or javascript: URL arriving over this channel
+    /// would turn the extension into a way to make Downlism read local files on a page's
+    /// behalf. magnet is safe to add for the opposite reason: it can only ever name a swarm,
+    /// never a path on this machine.
+    /// </summary>
+    public bool TryGetUri(out Uri uri) => Downloads.TransferRouting.TryParse(Url, out uri);
 
-        uri = null!;
-        return false;
+    /// <summary>
+    /// The engine to use. The extension's opinion is honoured only when the URL could plausibly
+    /// support it: a page claiming its link is a torrent must not be able to hand an arbitrary
+    /// http address to the BitTorrent session.
+    /// </summary>
+    public Downloads.TransferKind KindFor(Uri uri)
+    {
+        var routed = Downloads.TransferRouting.For(uri);
+
+        return Kind switch
+        {
+            // Media is the one upgrade a page is trusted with, because the extension saw the
+            // response headers and the URL alone cannot tell a video stream from a file.
+            "media" when uri.Scheme is "http" or "https" => Downloads.TransferKind.Media,
+            "file" when routed == Downloads.TransferKind.Media => Downloads.TransferKind.Http,
+            _ => routed,
+        };
     }
 }
 

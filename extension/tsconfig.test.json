@@ -6,5 +6,8 @@
     "module": "ESNext",
     "types": []
   },
-  "include": ["src/links.ts"]
+  "include": [
+    "src/links.ts",
+    "src/media.ts"
+  ]
 }

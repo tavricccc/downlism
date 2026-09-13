@@ -14,9 +14,16 @@
  *
  * Plus a context menu, for links the click route deliberately leaves alone.
  *
+ * Separately from all of that, it sniffs: response headers also reveal the video a page is
+ * playing, which is never a download the browser would report at all. Those finds are kept per
+ * tab and offered from the popup rather than taken automatically — a page playing a video has
+ * not asked for it to be saved.
+ *
  * Runs as a service worker, which the browser recycles after roughly thirty seconds of
  * idleness. Nothing here may assume it stays alive between downloads.
  */
+
+import { classify, isPageOnlyHost, merge, type FoundMedia } from "./media.js";
 
 const HOST_NAME = "com.downlism.host";
 
@@ -110,6 +117,10 @@ interface Handover {
   fileName?: string;
   referrer?: string;
   totalBytes?: number;
+  /** Which engine Downlism should use. Omitted means it decides from the URL. */
+  kind?: "file" | "media" | "torrent";
+  /** The page a sniffed stream was playing on; yt-dlp resolves it far better than the stream. */
+  pageUrl?: string;
 }
 
 async function handOver(item: Handover): Promise<boolean> {
@@ -120,6 +131,8 @@ async function handOver(item: Handover): Promise<boolean> {
     cookies: await cookieHeaderFor(item.url),
     userAgent: navigator.userAgent,
     totalBytes: item.totalBytes ?? 0,
+    kind: item.kind,
+    pageUrl: item.pageUrl,
   };
 
   try {
@@ -222,6 +235,89 @@ chrome.downloads.onDeterminingFilename.addListener((item) => {
   })();
 });
 
+/**
+ * Videos seen on each tab.
+ *
+ * Held in session storage rather than a module variable because the service worker is torn
+ * down after about thirty seconds of idleness, and a page can sit playing for far longer than
+ * that. Session storage is cleared when the browser closes, which is the right lifetime: a
+ * find is only meaningful while the page that produced it is still open.
+ */
+function mediaKey(tabId: number): string {
+  return `media:${tabId}`;
+}
+
+/**
+ * Every read-modify-write of the finds runs in turn.
+ *
+ * A video page issues several media responses within the same tick, and session storage has no
+ * atomic update: run them concurrently and each one reads the list before the others wrote,
+ * so all but the last find is lost. A navigation's clear joins the same queue for the same
+ * reason — otherwise a write already in flight resurrects the previous page's list.
+ */
+let mediaWrites: Promise<unknown> = Promise.resolve();
+
+function queueMediaWrite(work: () => Promise<void>): void {
+  mediaWrites = mediaWrites.then(work, work);
+}
+
+async function readMedia(tabId: number): Promise<FoundMedia[]> {
+  const stored = await chrome.storage.session.get(mediaKey(tabId));
+  return (stored[mediaKey(tabId)] as FoundMedia[] | undefined) ?? [];
+}
+
+async function rememberMedia(tabId: number, found: FoundMedia): Promise<void> {
+  const existing = await readMedia(tabId);
+  const merged = merge(existing, found);
+  if (merged === existing) return;
+
+  await chrome.storage.session.set({ [mediaKey(tabId)]: merged });
+
+  // Per-tab, so the count belongs to the page the person is actually looking at.
+  await chrome.action.setBadgeText({ tabId, text: String(merged.length) });
+  await chrome.action.setBadgeBackgroundColor({ tabId, color: "#165674" });
+}
+
+async function forgetMedia(tabId: number): Promise<void> {
+  await chrome.storage.session.remove(mediaKey(tabId));
+  try {
+    await chrome.action.setBadgeText({ tabId, text: "" });
+  } catch {
+    // The tab is already gone; there is no badge left to clear.
+  }
+}
+
+/**
+ * Route 4: the sniffer. Watches media responses rather than downloads, because a video that
+ * plays in a page is never reported to chrome.downloads at all.
+ */
+chrome.webRequest.onHeadersReceived.addListener(
+  (details) => {
+    if (!cached.enabled || details.tabId < 0) return;
+
+    // A signed, expiring, range-split URL from one of these sites cannot be downloaded on its
+    // own. The popup offers the page instead, which is the only thing that works there.
+    if (isPageOnlyHost(details.url)) return;
+
+    const found = classify(
+      details.url,
+      headerValue(details.responseHeaders, "content-type"),
+      Number(headerValue(details.responseHeaders, "content-length")) || 0,
+    );
+
+    if (found) queueMediaWrite(() => rememberMedia(details.tabId, found));
+  },
+  { urls: ["http://*/*", "https://*/*"], types: ["media", "xmlhttprequest", "object", "other"] },
+  ["responseHeaders"],
+);
+
+// A navigation replaces what the tab is playing, so the previous page's finds are stale.
+chrome.tabs.onUpdated.addListener((tabId, changes) => {
+  if (changes.url) queueMediaWrite(() => forgetMedia(tabId));
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => queueMediaWrite(() => forgetMedia(tabId)));
+
 /** A way to take any link, including the ones the click route deliberately leaves alone. */
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
@@ -230,15 +326,36 @@ chrome.runtime.onInstalled.addListener(() => {
       title: "用 Downlism 下載",
       contexts: ["link", "image", "video", "audio"],
     });
+
+    // Offered on the page itself, because the video element on a modern site has no usable
+    // src attribute for the link entry above to pick up.
+    chrome.contextMenus.create({
+      id: "downlism-page-video",
+      title: "用 Downlism 下載這個頁面的影片",
+      contexts: ["page", "video", "frame"],
+    });
   });
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "downlism-page-video") {
+    const page = info.pageUrl || tab?.url;
+    if (!page || !/^https?:/i.test(page)) return;
+
+    void (async () => {
+      if (!(await handOver({ url: page, kind: "media", pageUrl: page }))) await notifyFailure();
+    })();
+    return;
+  }
+
   const url = info.linkUrl || info.srcUrl;
-  if (!url || !/^https?:/i.test(url)) return;
+  // magnet is allowed here and nowhere else in this file: it is the one scheme that names a
+  // download without naming a server, so it can only ever arrive through a deliberate click.
+  if (!url || !/^(https?|magnet):/i.test(url)) return;
 
   void (async () => {
-    if (!(await handOver({ url, referrer: info.pageUrl || tab?.url }))) await notifyFailure();
+    const kind = url.toLowerCase().startsWith("magnet:") ? "torrent" : undefined;
+    if (!(await handOver({ url, kind, referrer: info.pageUrl || tab?.url }))) await notifyFailure();
   })();
 });
 
@@ -269,6 +386,33 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .sendNativeMessage(HOST_NAME, { url: "", ping: true })
       .then((reply) => sendResponse({ running: Boolean(reply?.accepted) }))
       .catch(() => sendResponse({ running: false }));
+    return true;
+  }
+
+  // The popup asks what was found on the tab it was opened over.
+  if (message?.type === "found") {
+    void (async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const media = tab?.id === undefined ? [] : await readMedia(tab.id);
+      sendResponse({ media, pageUrl: tab?.url ?? "", pageOnly: isPageOnlyHost(tab?.url ?? "") });
+    })();
+    return true;
+  }
+
+  if (message?.type === "download-media") {
+    void (async () => {
+      const handled = await handOver({
+        url: message.url,
+        // A stream has to be assembled; a whole file can be fetched as it is, and going
+        // through yt-dlp for it would only add a process.
+        kind: message.form === "file" ? "file" : "media",
+        pageUrl: message.form === "file" ? undefined : message.pageUrl,
+        referrer: message.pageUrl,
+      });
+
+      if (!handled) await notifyFailure();
+      sendResponse({ handled });
+    })();
     return true;
   }
 

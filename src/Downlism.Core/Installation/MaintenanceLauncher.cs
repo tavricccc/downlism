@@ -6,9 +6,12 @@ public static class MaintenanceLauncher
 {
     public static string CreateCommand(string target)
     {
-        var script = CreateScript(target, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
-        var shell = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe");
-        return $"\"{shell}\" -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {Convert.ToBase64String(Encoding.Unicode.GetBytes(script))}";
+        var uninstallExe = Path.Combine(target, "Uninstall.exe");
+        if (File.Exists(uninstallExe))
+        {
+            return $"\"{uninstallExe}\"";
+        }
+        return $"\"{Path.Combine(target, "Downlism.Setup.exe")}\" --uninstall";
     }
 
     public static string CreateScript(string target, string localAppData) => """

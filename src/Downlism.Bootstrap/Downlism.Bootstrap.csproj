@@ -2,11 +2,18 @@
  <PropertyGroup>
   <OutputType>WinExe</OutputType>
   <ApplicationIcon>..\..\docs\assets\downlism.ico</ApplicationIcon>
-  <AssemblyName>Downlism.Install</AssemblyName>
+  <AssemblyName>Downlism.Setup</AssemblyName>
   <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   <SelfContained>true</SelfContained>
-  <PublishSingleFile>false</PublishSingleFile>
-  <DebugType>embedded</DebugType>
+  <!-- One file is the whole point: everything the installer needs travels inside this
+       executable, including its own .NET runtime. Without a self-contained runtime the
+       installer would need .NET already present on a machine that has nothing. -->
+  <PublishSingleFile>true</PublishSingleFile>
+  <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  <!-- Only while debugging: embedded symbols travel inside the assembly, so in Release this
+       would put back exactly what Directory.Build.props strips out. -->
+  <DebugType Condition="'$(Configuration)' != 'Release'">embedded</DebugType>
   <ApplicationManifest>..\Downlism.App\app.manifest</ApplicationManifest>
  </PropertyGroup>
 </Project>

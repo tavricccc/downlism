@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using Downlism.Core.Downloads;
 using Downlism.Core.Http;
+using Downlism.Core.Media;
+using Downlism.Core.Torrents;
 
 namespace Downlism.App.Services;
 
@@ -16,9 +18,44 @@ public sealed class DownloadQueue : IDisposable
 {
     private readonly HttpClient _client = DownloadHttpClientFactory.Create(64);
     private readonly ConcurrentDictionary<Guid, Entry> _entries = new();
+
+    // Both of these hold state that must not be per-transfer: the tools are two executables on
+    // disk that several jobs would otherwise race to install, and the BitTorrent session is one
+    // listening port and one DHT table shared by every torrent.
+    private readonly MediaTools _tools;
+    private readonly TorrentEngine _torrents;
+
     private SemaphoreSlim _slots;
 
-    public DownloadQueue(int concurrentDownloads = 3) => _slots = new SemaphoreSlim(concurrentDownloads, concurrentDownloads);
+    public DownloadQueue(int concurrentDownloads = 3)
+    {
+        _slots = new SemaphoreSlim(concurrentDownloads, concurrentDownloads);
+        _tools = new MediaTools(_client);
+        _torrents = new TorrentEngine(_client);
+    }
+
+    /// <summary>
+    /// Whether the media tools have already been fetched. The window uses it to warn once,
+    /// before the first video download spends several minutes looking like it has stalled.
+    /// </summary>
+    public bool MediaToolsReady => _tools.IsReady;
+
+    /// <summary>
+    /// The BitTorrent session throttles in one place for every torrent at once, unlike HTTP
+    /// where each transfer carries its own ceiling.
+    /// </summary>
+    public Task SetTorrentRateLimitAsync(long bytesPerSecond) => _torrents.SetRateLimitAsync(bytesPerSecond);
+
+    /// <summary>
+    /// Picks the engine for a request. This is the only place that knows there is more than
+    /// one; everything else in the queue treats every transfer identically.
+    /// </summary>
+    private ITransferEngine EngineFor(DownloadRequest request) => request.Kind switch
+    {
+        TransferKind.Media => new MediaEngine(_tools),
+        TransferKind.Torrent => _torrents,
+        _ => new DownloadEngine(_client),
+    };
 
     /// <summary>How a transfer that fails for a transient reason is retried.</summary>
     public RetryPolicy Retry { get; set; } = RetryPolicy.Default;
@@ -64,8 +101,12 @@ public sealed class DownloadQueue : IDisposable
     {
         if (request.FileName is null) return null;
 
-        var directory = DownloadCategory.DirectoryFor(request.Directory, request.FileName, request.SortIntoCategories);
-        var partial = Path.Combine(directory, request.FileName) + DownloadTarget.PartialExtension;
+        // Sanitised for the same reason the engine sanitises it: this name reaches us from a
+        // web page by way of the extension, and an unsanitised one turns Path.Combine into an
+        // exception at best and a path outside the download folder at worst.
+        var fileName = SuggestedFileName.Sanitize(request.FileName);
+        var directory = DownloadCategory.DirectoryFor(request.Directory, fileName, request.SortIntoCategories);
+        var partial = Path.Combine(directory, fileName) + DownloadTarget.PartialExtension;
 
         try
         {
@@ -74,7 +115,7 @@ public sealed class DownloadQueue : IDisposable
 
             return new DownloadProgress(state.CompletedBytes(), state.TotalLength, 0, state.Segments.ToArray());
         }
-        catch (IOException)
+        catch (Exception exception) when (exception is IOException or ArgumentException or NotSupportedException)
         {
             return null;
         }
@@ -122,24 +163,37 @@ public sealed class DownloadQueue : IDisposable
         }
     }
 
-    public void SetConcurrency(int concurrentDownloads)
-    {
-        // Replacing the semaphore only affects transfers that have not started yet; stopping
-        // one already in flight to honour a new ceiling would throw away its progress.
-        Interlocked.Exchange(ref _slots, new SemaphoreSlim(concurrentDownloads, concurrentDownloads)).Dispose();
-    }
+    /// <summary>
+    /// Changes how many transfers may run at once.
+    /// </summary>
+    /// <remarks>
+    /// The new ceiling applies to transfers that have not started yet. Stopping one already in
+    /// flight to honour it would throw away its progress, and the person who lowered the limit
+    /// wanted less contention, not less finished work.
+    ///
+    /// The replaced semaphore is deliberately not disposed. Transfers already holding one of
+    /// its slots release it when they end, and a transfer still queued is waiting on it; either
+    /// one touching a disposed semaphore throws from a path that has no business failing. It is
+    /// an ordinary object and is collected once the last of them has let go.
+    /// </remarks>
+    public void SetConcurrency(int concurrentDownloads) =>
+        Interlocked.Exchange(ref _slots, new SemaphoreSlim(concurrentDownloads, concurrentDownloads));
 
     private async Task RunAsync(Entry entry)
     {
         var job = entry.Job;
         var token = entry.Cancellation.Token;
 
+        // Captured, not read again later: the limit can be changed while this transfer runs,
+        // and releasing a slot back into a semaphore that never issued it throws.
+        var slots = _slots;
+
         try
         {
             job.State = DownloadState.Queued;
             Changed?.Invoke(job);
 
-            await _slots.WaitAsync(token).ConfigureAwait(false);
+            await slots.WaitAsync(token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -164,11 +218,17 @@ public sealed class DownloadQueue : IDisposable
                     job.Error = null;
                     Changed?.Invoke(job);
 
-                    var result = await new DownloadEngine(_client)
+                    var result = await EngineFor(job.Request)
                         .RunAsync(job.Request, progress, token)
                         .ConfigureAwait(false);
 
                     job.Path = result.Path;
+                    // The engines that choose their own name only reveal it at the end.
+                    if (job.Request.Kind != TransferKind.Http)
+                    {
+                        job.FileName = Path.GetFileName(result.Path.TrimEnd(Path.DirectorySeparatorChar));
+                    }
+
                     job.State = DownloadState.Completed;
                     Changed?.Invoke(job);
                     return;
@@ -198,11 +258,11 @@ public sealed class DownloadQueue : IDisposable
         {
             try
             {
-                _slots.Release();
+                slots.Release();
             }
             catch (ObjectDisposedException)
             {
-                // The concurrency limit was changed while this transfer was running.
+                // The queue was torn down while this transfer was running.
             }
 
             entry.Cancellation.Dispose();
@@ -218,6 +278,10 @@ public sealed class DownloadQueue : IDisposable
     /// <summary>Turns an exception into something a person can act on.</summary>
     private static string Describe(Exception exception) => exception switch
     {
+        // These two already speak for themselves: yt-dlp and MonoTorrent report failures the
+        // person can act on, and restating them as "下載失敗" would throw that away.
+        MediaDownloadException media => media.Message,
+        TorrentException torrent => torrent.Message,
         TimeoutException => "伺服器沒有回應，已停止。可以繼續下載。",
         HttpRequestException { StatusCode: System.Net.HttpStatusCode.NotFound } => "檔案已不存在（404）。",
         HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden } => "伺服器拒絕存取（403）。可能需要重新登入來源網站。",
@@ -239,6 +303,11 @@ public sealed class DownloadQueue : IDisposable
 
         _entries.Clear();
         _slots.Dispose();
+
+        // Waited on, briefly. A torrent session that is not stopped leaves sockets open and its
+        // fast resume unwritten, which costs a full rehash on the next run; waiting forever on
+        // tracker goodbyes during application exit costs more than that is worth.
+        _torrents.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(4));
         _client.Dispose();
     }
 
@@ -263,7 +332,11 @@ public sealed class DownloadJob(Guid id, DownloadRequest request)
 
     public DownloadRequest Request { get; } = request;
 
-    public string FileName { get; } = request.FileName ?? SuggestedFileName.FromUri(request.Uri);
+    /// <summary>
+    /// Not fixed at creation. A video is named by yt-dlp and a torrent by its own metadata, so
+    /// the label a row starts with is a placeholder that the finished transfer replaces.
+    /// </summary>
+    public string FileName { get; set; } = request.FileName ?? SuggestedFileName.FromUri(request.Uri);
 
     public volatile DownloadState State = DownloadState.Queued;
 

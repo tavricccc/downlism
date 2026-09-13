@@ -12,9 +12,30 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
 
     public DownloadJob Job => job;
 
-    public string FileName => job.FileName;
+    /// <summary>
+    /// Observable, because a video or a torrent is only named once it finishes: the row starts
+    /// with the page title or the magnet's display name and settles on the real file.
+    /// </summary>
+    [ObservableProperty]
+    public partial string FileName { get; set; } = job.FileName;
 
-    public string Host => job.Request.Uri.Host;
+    /// <summary>
+    /// A two-character mark for the transfers that are not plain files. Left empty for HTTP,
+    /// which is the majority and needs no label to explain itself.
+    /// </summary>
+    public string KindLabel => job.Request.Kind switch
+    {
+        TransferKind.Media => "影片",
+        TransferKind.Torrent => "BT",
+        _ => "",
+    };
+
+    public bool HasKindLabel => KindLabel.Length > 0;
+
+    /// <summary>Where the transfer came from. A magnet link has no host to show.</summary>
+    public string Origin => job.Request.Uri.Scheme == TransferRouting.MagnetScheme
+        ? "BitTorrent"
+        : job.Request.Uri.Host;
 
     [ObservableProperty]
     public partial IReadOnlyList<Segment>? Segments { get; set; }
@@ -49,6 +70,7 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
     public void Refresh()
     {
         var progress = job.Progress;
+        FileName = job.FileName;
 
         Segments = progress?.Segments is { Count: > 0 } segments ? segments : null;
         Fraction = progress?.Fraction ?? 0;
@@ -75,9 +97,13 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
         Status = job.State switch
         {
             DownloadState.Queued => "排隊中",
-            DownloadState.Running => job.Attempt > 1
-                ? $"{job.Request.Uri.Host}（第 {job.Attempt} 次嘗試）"
-                : job.Request.Uri.Host,
+            // The engines that know something worth saying say it themselves: which stream is
+            // downloading, how many seeds answered, whether a tool is still being fetched.
+            DownloadState.Running => progress?.Note is { Length: > 0 } note
+                ? note
+                : job.Attempt > 1
+                    ? $"{Origin}（第 {job.Attempt} 次嘗試）"
+                    : Origin,
             DownloadState.Retrying => $"{job.Error ?? "連線中斷"} 稍後自動重試",
             DownloadState.Paused => "已暫停",
             DownloadState.Completed => "已完成",

@@ -18,6 +18,13 @@ public sealed class LoginStartupService
 
     public const string BackgroundArgument = "--background";
 
+    /// <summary>
+    /// Passed by the installer on the launch that follows a fresh install, so the app knows to
+    /// show the extension guide once. Kept here beside the other startup switch rather than
+    /// invented in two places that would drift apart.
+    /// </summary>
+    public const string ExtensionGuideArgument = "--extension-guide";
+
     public bool IsEnabled()
     {
         using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: false);
@@ -41,6 +48,12 @@ public sealed class LoginStartupService
         }
     }
 
-    public static bool StartedInBackground() =>
-        Environment.GetCommandLineArgs().Contains(BackgroundArgument, StringComparer.OrdinalIgnoreCase);
+    public static bool StartedInBackground() => HasArgument(BackgroundArgument);
+
+    /// <summary>True on the first launch after an install, which is the moment the browser
+    /// extension still has to be loaded by hand.</summary>
+    public static bool StartedForExtensionGuide() => HasArgument(ExtensionGuideArgument);
+
+    private static bool HasArgument(string argument) =>
+        Environment.GetCommandLineArgs().Contains(argument, StringComparer.OrdinalIgnoreCase);
 }

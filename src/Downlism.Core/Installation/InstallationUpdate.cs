@@ -10,13 +10,25 @@ public static class InstallationUpdate
         foreach (var (name, hash) in manifest.Files)
             if (!Matches(InstallFiles.Resolve(source, name), hash))
                 throw new InvalidDataException($"安裝檔案校驗失敗：{name}");
-        foreach (var required in new[] { "Downlism.App.exe", "Downlism.Setup.exe", "Downlism.Host.exe", "coreclr.dll", "Microsoft.UI.Xaml.dll" })
+        // Microsoft.WinUI.dll rather than Microsoft.UI.Xaml.dll: the managed projection is present
+        // in both layouts, while the native XAML binary only exists in the standalone one, where
+        // the whole Windows App SDK is copied into the installation. Naming the native binary
+        // here would refuse every shared-runtime release, including the upgrade that converts an
+        // existing standalone installation into one.
+        foreach (var required in new[] { "Downlism.App.exe", "Downlism.Setup.exe", "Uninstall.exe", "Downlism.Host.exe", "coreclr.dll", "Microsoft.WinUI.dll" })
             if (!manifest.Files.ContainsKey(required)) throw new InvalidDataException($"安裝資料夾缺少 {required}");
         return manifest;
     }
 
     // Only changed files are staged/backed up. Unchanged runtimes retain their files and timestamps.
     // Rollback covers file and registration errors; this is not a power-loss journal.
+    //
+    // Files the previous manifest listed and the new one does not are removed, which is what
+    // converts an existing standalone installation to the shared runtime without anyone having
+    // to uninstall first: the 145 MB of Windows App SDK binaries it was carrying simply stop
+    // being part of the installation. Leaving them would be worse than wasteful — a
+    // Microsoft.UI.Xaml.dll beside the executable wins over the framework package, so the app
+    // would keep loading the old copy and quietly ignore the shared one.
     public static void Apply(string source, string target, Action<InstallManifest> register)
     {
         source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source));

@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" />
+    <!-- The BitTorrent stack. MIT, pure managed, and the only maintained .NET implementation
+         that speaks magnet links, DHT and peer exchange without a second process. -->
+    <PackageReference Include="MonoTorrent" />
     <!-- Pins SQLitePCLRaw above the 2.1.11 advisory pulled in transitively (GHSA-2m69-gcr7-jv3q). -->
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
   </ItemGroup>

@@ -11,8 +11,8 @@ public sealed partial class MainWindow : Window
 {
     [DllImport("user32.dll")]
     private static extern uint GetDpiForWindow(nint window);
-    private readonly bool _uninstall;
-    private readonly bool _updating;
+    private bool _uninstall;
+    private bool _updating;
     private bool _busy;
     private bool _complete;
     public MainWindow()
@@ -30,7 +30,8 @@ public sealed partial class MainWindow : Window
         if (AppWindow.Presenter is OverlappedPresenter presenter) presenter.IsMaximizable = false;
         AppWindow.Closing += (_, args) => args.Cancel = _busy;
         var args = Environment.GetCommandLineArgs();
-        _uninstall = args.Contains("--uninstall");
+        var processName = Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? "");
+        _uninstall = args.Contains("--uninstall") || processName.Equals("Uninstall", StringComparison.OrdinalIgnoreCase);
         _updating = !_uninstall && InstallationService.InstalledPath is not null;
         VersionText.Text = $"Downlism {typeof(MainWindow).Assembly.GetName().Version?.ToString(3)}";
         InstallPath.Text = InstallationService.InstalledPath ?? InstallationService.DefaultPath;
@@ -52,8 +53,23 @@ public sealed partial class MainWindow : Window
             InstallPath.IsReadOnly = true;
             DesktopShortcut.IsChecked = InstallationService.HasDesktopShortcut;
             DesktopShortcut.Visibility = Visibility.Collapsed;
+            UninstallLink.Visibility = Visibility.Visible;
             ActionButton.Content = "更新";
         }
+    }
+
+    private void UninstallLinkClick(object sender, RoutedEventArgs e)
+    {
+        _uninstall = true;
+        _updating = false;
+        UninstallLink.Visibility = Visibility.Collapsed;
+        Heading.Text = "解除安裝 Downlism";
+        Description.Text = "移除 Downlism 及其本機資料。";
+        Details.Text = "預設清除設定、使用紀錄與快取。若想在重新安裝後繼續使用原設定，請勾選保留資料。執行中的 Downlism 會自動關閉。";
+        InstallPath.IsReadOnly = true;
+        DesktopShortcut.Visibility = Visibility.Collapsed;
+        KeepData.Visibility = Visibility.Visible;
+        ActionButton.Content = "解除安裝";
     }
 
     private void CloseClick(object sender, RoutedEventArgs e) => Close();
@@ -70,6 +86,10 @@ public sealed partial class MainWindow : Window
                 {
                     Process.Start(new ProcessStartInfo(Path.Combine(InstallPath.Text, "Downlism.App.exe"))
                     {
+                        // A first install ends with the extension still unloaded, so the app is
+                        // asked to show the four steps that load it. An update is not told to:
+                        // the extension is already in place and the guide would be a nag.
+                        Arguments = _updating ? string.Empty : "--extension-guide",
                         UseShellExecute = true,
                         WorkingDirectory = InstallPath.Text,
                     });

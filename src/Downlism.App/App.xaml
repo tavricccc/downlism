@@ -16,6 +16,18 @@
                 <Setter Property="MinWidth" Value="0" />
                 <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
             </Style>
+
+            <!-- The step numbers in the extension guide. A circled numeral does the work a
+                 bullet cannot: it says the steps are ordered and must be done in that order. -->
+            <Style x:Key="StepNumberStyle" TargetType="Border">
+                <Setter Property="Width" Value="26" />
+                <Setter Property="Height" Value="26" />
+                <Setter Property="CornerRadius" Value="13" />
+                <Setter Property="VerticalAlignment" Value="Top" />
+                <Setter Property="Background" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                <Setter Property="HorizontalAlignment" Value="Center" />
+                <Setter Property="Padding" Value="0" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

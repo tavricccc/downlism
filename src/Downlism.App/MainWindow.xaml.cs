@@ -17,9 +17,17 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<Guid, DownloadRowViewModel> _byId = [];
     private readonly DispatcherQueue _dispatcher;
     private readonly DownloadStore _store = new(DownloadStore.DefaultPath);
+    private readonly LoginStartupService _loginStartup = new();
     private AppSettings _settings = AppSettings.Load();
     private string? _lastClipboardUrl;
     private long _bytesPerSecond;
+
+    /// <summary>
+    /// False until the settings controls have been filled in. Selecting an item raises
+    /// SelectionChanged, and without this the constructor would write every setting straight
+    /// back out again before the window is even shown.
+    /// </summary>
+    private bool _ready;
 
     public MainWindow()
     {
@@ -40,9 +48,24 @@ public sealed partial class MainWindow : Window
         };
 
         _bytesPerSecond = _settings.BytesPerSecond;
+        // Read from the Run key rather than from settings.json: the registry is where the
+        // choice actually lives, and a copy in the settings file would disagree with it the
+        // first time the value is removed from outside the app.
+        LaunchAtLogin.IsChecked = _loginStartup.IsEnabled();
         SortIntoCategories.IsChecked = _settings.SortIntoCategories;
         WatchClipboard.IsChecked = _settings.WatchClipboard;
+        AskOnCapture.IsChecked = _settings.PromptOnCapture;
+
+        Select(Connections, _settings.Connections);
+        Select(ConcurrentDownloads, _settings.ConcurrentDownloads);
+        Select(SpeedLimit, _settings.BytesPerSecond);
+        _ready = true;
+
         App.Queue.Retry = new RetryPolicy(Math.Max(1, _settings.RetryAttempts));
+        // Applied here rather than at the queue's construction, which happens before any
+        // settings have been read. Without this the stored limit was written, shown and ignored.
+        App.Queue.SetConcurrency(Math.Clamp(_settings.ConcurrentDownloads, 1, 16));
+        _ = App.Queue.SetTorrentRateLimitAsync(_settings.BytesPerSecond);
         if (_settings.WatchClipboard) Clipboard.ContentChanged += OnClipboardChanged;
 
         RestoreHistory();
@@ -58,13 +81,15 @@ public sealed partial class MainWindow : Window
     {
         foreach (var stored in _store.Load())
         {
-            if (!Uri.TryCreate(stored.Url, UriKind.Absolute, out var uri)) continue;
+            if (!TransferRouting.TryParse(stored.Url, out var uri)) continue;
 
             var job = App.Queue.Restore(
                 stored.Id,
                 new DownloadRequest
                 {
                     Uri = uri,
+                    Kind = stored.Kind,
+                    PageUrl = stored.PageUrl,
                     Directory = stored.Directory,
                     FileName = stored.FileName,
                     // Already the final directory; sorting again would nest a second folder.
@@ -79,7 +104,66 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>Called by the ingest listener from a background thread.</summary>
-    public void AddFromBrowser(DownloadJob job) => _dispatcher.TryEnqueue(() => Track(job));
+    public void AddFromBrowser(CaptureRequest capture) => _dispatcher.TryEnqueue(() => Capture(capture));
+
+    /// <summary>
+    /// Opens the per-download window for a capture, or starts it outright if the person has
+    /// said they no longer want to be asked.
+    /// </summary>
+    /// <remarks>
+    /// Raising the whole list for every captured download would put a thousand-pixel window
+    /// over whatever they were reading in order to say one sentence. The prompt is the small
+    /// version of that, and it is also the only moment where the name and the folder can still
+    /// be changed without moving a finished file afterwards.
+    /// </remarks>
+    private void Capture(CaptureRequest capture)
+    {
+        if (!_settings.PromptOnCapture)
+        {
+            Track(App.Queue.Add(capture.Request));
+            return;
+        }
+
+        var window = new NewDownloadWindow(capture, Accept, StopAsking);
+        window.Activate();
+        window.ForceForeground();
+    }
+
+    /// <summary>
+    /// Takes the request back from the prompt. "Later" enters the row without starting it,
+    /// which is the same state a paused transfer is in, so the resume button already works.
+    /// </summary>
+    private DownloadJob Accept(DownloadRequest request, bool start)
+    {
+        RememberFolder(request.Directory);
+
+        var job = start
+            ? App.Queue.Add(request)
+            : App.Queue.Restore(Guid.NewGuid(), request, DownloadState.Paused, null);
+        Track(job);
+        return job;
+    }
+
+    private void StopAsking(bool stop)
+    {
+        if (!stop) return;
+
+        _settings = _settings with { PromptOnCapture = false };
+        _settings.Save();
+        AskOnCapture.IsChecked = false;
+    }
+
+    /// <summary>
+    /// The folder chosen in the prompt becomes the default for the next one. Choosing the same
+    /// folder repeatedly is the commonest thing anyone does in a dialog like this.
+    /// </summary>
+    private void RememberFolder(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || directory == _settings.DownloadFolder) return;
+
+        _settings = _settings with { DownloadFolder = directory };
+        _settings.Save();
+    }
 
     private void OnJobChanged(DownloadJob job) => _dispatcher.TryEnqueue(() =>
     {
@@ -125,7 +209,9 @@ public sealed partial class MainWindow : Window
         job.Request.Referrer,
         job.State.ToString(),
         job.Path,
-        DateTimeOffset.UtcNow));
+        DateTimeOffset.UtcNow,
+        job.Request.Kind,
+        job.Request.PageUrl));
 
     private void UpdateEmptyState()
     {
@@ -135,32 +221,80 @@ public sealed partial class MainWindow : Window
 
     private async void PasteClick(object sender, RoutedEventArgs e)
     {
-        var content = Clipboard.GetContent();
-        var text = content.Contains(StandardDataFormats.Text) ? (await content.GetTextAsync()).Trim() : string.Empty;
-
-        if (!Uri.TryCreate(text, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        if (await ClipboardLinkAsync() is not { } uri)
         {
             // Say what is wrong and what to do, not that something failed.
-            Show("剪貼簿裡沒有 http 或 https 網址。複製一個下載連結後再試一次。", InfoBarSeverity.Informational);
+            Show("剪貼簿裡沒有網址。複製下載連結、影片頁面網址或磁力連結後再試一次。", InfoBarSeverity.Informational);
             return;
         }
 
-        Start(uri);
+        Start(uri, TransferRouting.For(uri));
     }
 
     /// <summary>
-    /// Starts a download, choosing its folder from the file name so the Downloads folder does
-    /// not become the usual undifferentiated pile.
+    /// Sends whatever is on the clipboard to yt-dlp, whatever the URL looks like. The routing
+    /// rules only recognise manifests and a short list of well-known sites; this is how to say
+    /// "there is a video on this page" about the thousand sites they do not list.
     /// </summary>
-    private void Start(Uri uri) => Track(App.Queue.Add(new DownloadRequest
+    private async void PasteMediaClick(object sender, RoutedEventArgs e)
     {
-        Uri = uri,
-        Directory = IngestListener.DownloadFolder(),
-        SortIntoCategories = _settings.SortIntoCategories,
-        Connections = _settings.Connections,
-        BytesPerSecond = _bytesPerSecond,
-    }));
+        if (await ClipboardLinkAsync() is not { } uri)
+        {
+            Show("剪貼簿裡沒有網址。複製影片頁面的網址後再試一次。", InfoBarSeverity.Informational);
+            return;
+        }
+
+        if (uri.Scheme == TransferRouting.MagnetScheme)
+        {
+            Show("磁力連結不是影片頁面，直接按「貼上網址」即可。", InfoBarSeverity.Informational);
+            return;
+        }
+
+        if (!App.Queue.MediaToolsReady)
+        {
+            // Said before the wait rather than during it: a first run spends several minutes
+            // fetching yt-dlp and ffmpeg, and an unexplained pause reads as a hang.
+            Show("第一次下載影片會先取得 yt-dlp 與 ffmpeg，約 200 MB，之後不會再下載一次。", InfoBarSeverity.Informational);
+        }
+
+        Start(uri, TransferKind.Media);
+    }
+
+    private async Task<Uri?> ClipboardLinkAsync()
+    {
+        var content = Clipboard.GetContent();
+        if (!content.Contains(StandardDataFormats.Text)) return null;
+
+        var text = (await content.GetTextAsync()).Trim();
+        return TransferRouting.TryParse(text, out var uri) ? uri : null;
+    }
+
+    /// <summary>
+    /// Offers a link in the per-download window rather than starting it. The folder still
+    /// defaults to a category of the Downloads folder, so the usual undifferentiated pile is
+    /// avoided without anyone having to choose anything.
+    /// </summary>
+    private void Start(Uri uri, TransferKind kind)
+    {
+        var request = new DownloadRequest
+        {
+            Uri = uri,
+            Kind = kind,
+            // For media the URL is both the target and the page yt-dlp resolves. The other two
+            // engines have no page involved at all.
+            PageUrl = kind == TransferKind.Media ? uri.AbsoluteUri : null,
+            Directory = IngestListener.DownloadFolder(_settings),
+            SortIntoCategories = _settings.SortIntoCategories,
+            Connections = _settings.Connections,
+            BytesPerSecond = _bytesPerSecond,
+        };
+
+        // A link added by hand always asks, whatever the capture setting says: the person is
+        // already here, and this is where the name and the folder get decided.
+        var window = new NewDownloadWindow(new CaptureRequest(request, 0), Accept);
+        window.Activate();
+        window.ForceForeground();
+    }
 
     /// <summary>Read by the ingest listener so browser handovers follow the same choices.</summary>
     public AppSettings Settings => _settings;
@@ -173,6 +307,102 @@ public sealed partial class MainWindow : Window
 
         Clipboard.ContentChanged -= OnClipboardChanged;
         if (watch) Clipboard.ContentChanged += OnClipboardChanged;
+    }
+
+    /// <summary>
+    /// Picks the item whose Tag is this number, falling back to the first. The tags are the
+    /// values themselves, so the stored setting survives the list being reordered or extended.
+    /// </summary>
+    private static void Select(ComboBox box, long value)
+    {
+        foreach (var item in box.Items.OfType<ComboBoxItem>())
+        {
+            if (item.Tag is not string tag || !long.TryParse(tag, out var candidate) || candidate != value) continue;
+
+            box.SelectedItem = item;
+            return;
+        }
+
+        box.SelectedIndex = 0;
+    }
+
+    /// <summary>Reads the selected Tag, or null when the box holds something unexpected.</summary>
+    private static long? SelectedValue(ComboBox box) =>
+        box.SelectedItem is ComboBoxItem { Tag: string tag } && long.TryParse(tag, out var value) ? value : null;
+
+    private void ConnectionsChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_ready || SelectedValue(Connections) is not { } value) return;
+
+        // Applies to transfers started from here on. Re-planning the segments of one already
+        // running would mean discarding the ranges it has partly filled.
+        _settings = _settings with { Connections = (int)value };
+        _settings.Save();
+    }
+
+    private void ConcurrentDownloadsChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_ready || SelectedValue(ConcurrentDownloads) is not { } value) return;
+
+        _settings = _settings with { ConcurrentDownloads = (int)value };
+        _settings.Save();
+        App.Queue.SetConcurrency((int)value);
+    }
+
+    /// <summary>Shows the four steps that load the browser extension.</summary>
+    private void ExtensionGuideClick(object sender, RoutedEventArgs e) => ShowExtensionGuide();
+
+    public void ShowExtensionGuide() => new ExtensionGuideWindow().Activate();
+
+    /// <summary>
+    /// Shows the extension guide once this window has drawn, for the launch that follows an
+    /// install. Must be called before the window is activated.
+    /// </summary>
+    /// <remarks>
+    /// Hung off this window's own Loaded rather than off Activated, which has usually already
+    /// fired by the time the app has anything to subscribe to, and then queued at low priority
+    /// so the guide opens onto a list that has finished its first layout instead of racing it.
+    /// </remarks>
+    public void ShowExtensionGuideOnFirstFrame()
+    {
+        Root.Loaded += OnFirstLoad;
+
+        void OnFirstLoad(object sender, RoutedEventArgs e)
+        {
+            Root.Loaded -= OnFirstLoad;
+            _dispatcher.TryEnqueue(DispatcherQueuePriority.Low, ShowExtensionGuide);
+        }
+    }
+
+    private void AskOnCaptureClick(object sender, RoutedEventArgs e)
+    {
+        // The way back. Without a control here, the checkbox in the prompt would be a one-way
+        // door out of a feature.
+        _settings = _settings with { PromptOnCapture = AskOnCapture.IsChecked == true };
+        _settings.Save();
+    }
+
+    /// <summary>
+    /// Raised after the window changes the login-startup setting, so the tray menu's tick does
+    /// not go on claiming the opposite of what the settings flyout now shows.
+    /// </summary>
+    public event EventHandler? LaunchAtLoginChanged;
+
+    /// <summary>Re-reads the Run key, for when the tray menu was the one that changed it.</summary>
+    public void RefreshLaunchAtLogin() => LaunchAtLogin.IsChecked = _loginStartup.IsEnabled();
+
+    private void LaunchAtLoginClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _loginStartup.SetEnabled(LaunchAtLogin.IsChecked == true);
+            LaunchAtLoginChanged?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
+        {
+            // Nothing was written, so the checkbox must not keep the state it was clicked into.
+            LaunchAtLogin.IsChecked = _loginStartup.IsEnabled();
+        }
     }
 
     private void SortIntoCategoriesClick(object sender, RoutedEventArgs e)
@@ -195,8 +425,7 @@ public sealed partial class MainWindow : Window
 
             var text = (await content.GetTextAsync()).Trim();
             if (text == _lastClipboardUrl) return;
-            if (!Uri.TryCreate(text, UriKind.Absolute, out var uri)) return;
-            if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return;
+            if (!TransferRouting.TryParse(text, out var uri)) return;
 
             _lastClipboardUrl = text;
             Offer(uri);
@@ -209,15 +438,25 @@ public sealed partial class MainWindow : Window
 
     private void Offer(Uri uri)
     {
+        var kind = TransferRouting.For(uri);
+
         var action = new Button { Content = "下載" };
         action.Click += (_, _) =>
         {
             Notice.IsOpen = false;
-            Start(uri);
+            Start(uri, kind);
         };
 
         Notice.ActionButton = action;
-        Show($"剪貼簿裡有 {Downlism.Core.Http.SuggestedFileName.FromUri(uri)}", InfoBarSeverity.Informational);
+
+        var what = kind switch
+        {
+            TransferKind.Torrent => $"磁力連結 {Downlism.Core.Http.SuggestedFileName.FromUri(uri)}",
+            TransferKind.Media => $"影片來源 {uri.Host}",
+            _ => Downlism.Core.Http.SuggestedFileName.FromUri(uri),
+        };
+
+        Show($"剪貼簿裡有 {what}", InfoBarSeverity.Informational);
     }
 
     private async void HashClick(object sender, RoutedEventArgs e)
@@ -265,13 +504,17 @@ public sealed partial class MainWindow : Window
 
     private void SpeedLimitChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (SpeedLimit.SelectedItem is not ComboBoxItem { Tag: string tag } || !long.TryParse(tag, out var rate)) return;
+        if (!_ready || SelectedValue(SpeedLimit) is not { } rate) return;
 
         // Applies to transfers started from here on; changing the ceiling mid-flight would mean
         // tearing down connections that are already moving bytes.
         _bytesPerSecond = rate;
         _settings = _settings with { BytesPerSecond = rate };
         _settings.Save();
+
+        // BitTorrent throttles per session rather than per transfer, so the new ceiling has to
+        // reach torrents that are already running.
+        _ = App.Queue.SetTorrentRateLimitAsync(rate);
     }
 
     private static void WithId(object sender, Action<Guid> action)

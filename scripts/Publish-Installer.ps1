@@ -1,20 +1,22 @@
 # One version for the whole product: the installer is never released separately from the
 # app it installs, so a second number would only ever be a thing to keep in sync.
 param(
-    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.3.0'
+    [ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version = '0.4.0'
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$releaseRoot = Join-Path $projectRoot 'artifacts/installer/current'
-$work = Join-Path $projectRoot ('artifacts/installer/.build-' + [guid]::NewGuid().ToString('N'))
-$stagedRelease = Join-Path $work 'release'
+$installerRoot = Join-Path $projectRoot 'artifacts/installer'
+# One file, and it is the release. There is no folder beside it to keep, and no second
+# installer to choose between: both layouts travel inside it and it decides which to install.
+$releaseExe = Join-Path $installerRoot 'Downlism.Setup.exe'
+$work = Join-Path $installerRoot ('.build-' + [guid]::NewGuid().ToString('N'))
 function Invoke-Dotnet([string[]]$Arguments) {
     & dotnet @Arguments
     if ($LASTEXITCODE -ne 0) { throw "dotnet failed: $($Arguments -join ' ')" }
 }
 function Assert-SafeTree([string]$Path) {
     $resolved = [IO.Path]::GetFullPath($Path)
-    $allowed = [IO.Path]::GetFullPath((Join-Path $projectRoot 'artifacts/installer')) + [IO.Path]::DirectorySeparatorChar
+    $allowed = [IO.Path]::GetFullPath($installerRoot) + [IO.Path]::DirectorySeparatorChar
     if (!$resolved.StartsWith($allowed, [StringComparison]::OrdinalIgnoreCase)) { throw "Unsafe build path: $resolved" }
     for ($ancestor = $resolved; $ancestor; $ancestor = [IO.Path]::GetDirectoryName($ancestor)) {
         if ((Test-Path -LiteralPath $ancestor) -and ((Get-Item -LiteralPath $ancestor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Build path contains a reparse point.' }
@@ -25,16 +27,64 @@ function Assert-SafeTree([string]$Path) {
         }
     }
 }
+
+# Builds one complete installation layout: the app, the native messaging host and the setup
+# interface, published together so they share one copy of the .NET runtime between them.
+function New-Layout([string]$Destination, [bool]$SelfContainedSdk) {
+    $sdk = if ($SelfContainedSdk) { 'true' } else { 'false' }
+    foreach ($project in @('src/Downlism.App/Downlism.App.csproj', 'src/Downlism.Host/Downlism.Host.csproj', 'src/Downlism.Setup/Downlism.Setup.csproj', 'src/Downlism.Uninstall/Downlism.Uninstall.csproj')) {
+        Invoke-Dotnet @('publish', $project, '-c', 'Release', '-p:Platform=x64', "-p:AppVersion=$Version", "-p:WindowsAppSDKSelfContained=$sdk", '-o', $Destination)
+    }
+    Copy-Item -Path (Join-Path $projectRoot 'extension/dist') -Destination (Join-Path $Destination 'extension') -Recurse
+
+    # The Windows App SDK metapackage drags its machine-learning stack along with everything
+    # else. Downlism calls none of the Windows AI APIs, and these two are loaded only when
+    # something does, so they are 38 MB of an installer that exists to download files. There is
+    # no supported property to exclude them, hence the deletion here rather than in a project.
+    foreach ($unused in @('onnxruntime.dll', 'DirectML.dll')) {
+        $path = Join-Path $Destination $unused
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+    }
+
+    # coreclr.dll being present is not proof that each executable carries its own runtime: the
+    # files are merged from several publishes, so one framework-dependent executable can sit
+    # among them and only fail on a machine without the matching .NET installed.
+    foreach ($runtimeConfig in Get-ChildItem -LiteralPath $Destination -Filter 'Downlism.*.runtimeconfig.json' -File) {
+        $options = (Get-Content -LiteralPath $runtimeConfig.FullName -Raw | ConvertFrom-Json).runtimeOptions
+        if ($options.PSObject.Properties.Name -contains 'framework' -or
+            $options.PSObject.Properties.Name -contains 'frameworks') {
+            throw "$($runtimeConfig.Name) is framework-dependent; publish it self-contained."
+        }
+    }
+
+    $files = [ordered]@{}
+    $destPrefix = $Destination.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    foreach ($file in Get-ChildItem -LiteralPath $Destination -File -Recurse | Sort-Object FullName) {
+        $relPath = if ($file.FullName.StartsWith($destPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $file.FullName.Substring($destPrefix.Length)
+        } else {
+            $file.FullName
+        }
+        $files[$relPath] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+    }
+    # Microsoft.UI.Xaml.dll only lives in the installation when the SDK is copied in, so the
+    # shared layout is checked against the managed projection that both layouts carry.
+    $expected = @('Downlism.App.exe', 'Downlism.Setup.exe', 'Uninstall.exe', 'Downlism.Host.exe', 'coreclr.dll', 'Microsoft.WinUI.dll')
+    $expected += if ($SelfContainedSdk) { 'Microsoft.UI.Xaml.dll' } else { 'Microsoft.WindowsAppRuntime.Bootstrap.dll' }
+    foreach ($required in $expected) {
+        if (!$files.Contains($required)) { throw "Missing $required" }
+    }
+    @{ Product = 'Downlism'; Version = $Version; Files = $files } | ConvertTo-Json -Depth 5 |
+        Set-Content -LiteralPath (Join-Path $Destination 'downlism-install.json') -Encoding utf8
+}
+
 Push-Location $projectRoot
 try {
-    Assert-SafeTree $releaseRoot
     Assert-SafeTree $work
 
     & (Join-Path $PSScriptRoot 'New-BrandIcon.ps1') | Out-Null
     Invoke-Dotnet @('test', 'tests/Downlism.Tests/Downlism.Tests.csproj', '-c', 'Release')
 
-    # The extension ships inside the installation folder so it can be loaded unpacked from a
-    # stable path. Its embedded key fixes the ID, which is what the host registration names.
     Push-Location (Join-Path $projectRoot 'extension')
     try {
         & npm install --silent --no-fund --no-audit
@@ -48,103 +98,100 @@ try {
     } finally {
         Pop-Location
     }
-    $app = Join-Path $work 'app'
-    $setup = Join-Path $work 'setup'
-    $launcher = Join-Path $work 'launcher'
-    Invoke-Dotnet @('publish', 'src/Downlism.App/Downlism.App.csproj', '-c', 'Release', '-p:Platform=x64', "-p:AppVersion=$Version", '-o', $app)
-    # The native messaging host ships beside the app: browsers launch it by absolute path,
-    # so it must live in the installation folder and never in a user-writable location.
-    Invoke-Dotnet @('publish', 'src/Downlism.Host/Downlism.Host.csproj', '-c', 'Release', '-p:Platform=x64', "-p:AppVersion=$Version", '-o', $app)
-    Invoke-Dotnet @('publish', 'src/Downlism.Setup/Downlism.Setup.csproj', '-c', 'Release', '-p:Platform=x64', "-p:AppVersion=$Version", '-o', $setup)
-    Invoke-Dotnet @('publish', 'src/Downlism.Bootstrap/Downlism.Bootstrap.csproj', '-c', 'Release', "-p:AppVersion=$Version", '-o', $launcher)
-    foreach ($name in @('Downlism.Install.dll', 'Downlism.Install.deps.json', 'Downlism.Install.runtimeconfig.json')) {
-        Copy-Item -LiteralPath (Join-Path $launcher $name) -Destination $app
-    }
-    # Shared runtime files must be identical. Never silently choose conflicting dependencies.
-    foreach ($file in Get-ChildItem -LiteralPath $setup -File -Recurse) {
-        $relative = [IO.Path]::GetRelativePath($setup, $file.FullName)
-        $destination = Join-Path $app $relative
-        if (Test-Path -LiteralPath $destination) {
-            if ((Get-FileHash -LiteralPath $destination).Hash -ne (Get-FileHash -LiteralPath $file.FullName).Hash) { throw "Conflicting shared file: $relative" }
-        } else {
-            [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
-            Copy-Item -LiteralPath $file.FullName -Destination $destination
-        }
-    }
-    Copy-Item -Path (Join-Path $projectRoot 'extension/dist') -Destination (Join-Path $app 'extension') -Recurse
 
-    $files = [ordered]@{}
-    foreach ($file in Get-ChildItem -LiteralPath $app -File -Recurse | Sort-Object FullName) {
-        $files[[IO.Path]::GetRelativePath($app, $file.FullName)] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+    $sharedTree = Join-Path $work 'shared'
+    $standaloneTree = Join-Path $work 'standalone'
+    New-Layout $sharedTree $false
+    New-Layout $standaloneTree $true
+
+    # The two layouts overlap almost entirely -- the second is the first plus the Windows App
+    # SDK binaries -- so a file present in both with the same contents is stored once. Shipping
+    # both layouts whole would add a hundred megabytes to the download for a second copy of
+    # files that are byte for byte what the first copy already carries.
+    $payload = Join-Path $work 'payload'
+    $sharedHashes = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $sharedTree -File -Recurse) {
+        $sharedHashes[[IO.Path]::GetRelativePath($sharedTree, $file.FullName)] = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
     }
-    foreach ($required in @('Downlism.App.exe', 'Downlism.Setup.exe', 'Downlism.Host.exe', 'coreclr.dll', 'Microsoft.UI.Xaml.dll')) {
-        if (!$files.Contains($required)) { throw "Missing $required" }
+    $shared = 0
+    foreach ($file in Get-ChildItem -LiteralPath $standaloneTree -File -Recurse) {
+        $relative = [IO.Path]::GetRelativePath($standaloneTree, $file.FullName)
+        $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+        $section = 'standalone'
+        if ($sharedHashes[$relative] -eq $hash) { $shared++; $section = 'common' }
+        $destination = Join-Path $payload (Join-Path $section $relative)
+        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
+        Copy-Item -LiteralPath $file.FullName -Destination $destination
     }
-    # coreclr.dll being present is not proof that each executable carries its own runtime: the
-    # shared files are merged from several publishes, so one framework-dependent executable can
-    # sit among them and only fail on a machine without the matching .NET installed.
-    foreach ($runtimeConfig in Get-ChildItem -LiteralPath $app -Filter 'Downlism.*.runtimeconfig.json' -File) {
-        $options = (Get-Content -LiteralPath $runtimeConfig.FullName -Raw | ConvertFrom-Json).runtimeOptions
-        if ($options.PSObject.Properties.Name -contains 'framework' -or
-            $options.PSObject.Properties.Name -contains 'frameworks') {
-            throw "$($runtimeConfig.Name) is framework-dependent; publish it self-contained."
-        }
+    foreach ($file in Get-ChildItem -LiteralPath $sharedTree -File -Recurse) {
+        $relative = [IO.Path]::GetRelativePath($sharedTree, $file.FullName)
+        if (Test-Path -LiteralPath (Join-Path $payload (Join-Path 'common' $relative))) { continue }
+        $destination = Join-Path $payload (Join-Path 'shared' $relative)
+        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
+        Copy-Item -LiteralPath $file.FullName -Destination $destination
     }
-    # Finish the entire release before touching current. Old installers are never pruned.
-    @{ Product = 'Downlism'; Version = $Version; Files = $files } | ConvertTo-Json -Depth 5 |
-        Set-Content -LiteralPath (Join-Path $app 'downlism-install.json') -Encoding utf8
-    [IO.Directory]::CreateDirectory($stagedRelease) | Out-Null
-    $stagedResources = Join-Path $stagedRelease 'resources'
-    Assert-SafeTree $app
-    Assert-SafeTree $stagedResources
-    Move-Item -LiteralPath $app -Destination $stagedResources
-    # Generate a native .NET apphost whose managed entry point lives in resources.
-    # It resolves the self-contained runtime there, without another copy or a shell wrapper.
-    $dotnetRoot = Split-Path (Get-Command dotnet).Source
-    $sdk = (& dotnet --version).Trim()
-    Add-Type -Path (Join-Path $dotnetRoot "sdk/$sdk/Microsoft.NET.HostModel.dll")
-    $hostPack = Get-ChildItem -LiteralPath (Join-Path $dotnetRoot 'packs/Microsoft.NETCore.App.Host.win-x64') -Directory |
-        Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
-    $hostTemplate = Join-Path $hostPack.FullName 'runtimes/win-x64/native/apphost.exe'
-    [Microsoft.NET.HostModel.AppHost.HostWriter]::CreateAppHost($hostTemplate, (Join-Path $stagedRelease 'Downlism.Setup.exe'),
-        'resources/Downlism.Install.dll', $true, (Join-Path $launcher 'Downlism.Install.exe'), $false, $false, $null)
-    $archive = $null
-    $emptyRelease = (Test-Path -LiteralPath $releaseRoot) -and !(Get-ChildItem -LiteralPath $releaseRoot -File -Recurse | Where-Object { $_.FullName -ne (Join-Path $releaseRoot 'Downlism.Setup.exe') } | Select-Object -First 1)
-    if ((Test-Path -LiteralPath $releaseRoot) -and !$emptyRelease) {
-        $oldManifest = Join-Path $releaseRoot 'resources/downlism-install.json'
-        if (!(Test-Path -LiteralPath $oldManifest)) { $oldManifest = Join-Path $releaseRoot 'downlism-install.json' }
-        $previousVersion = 'unknown'
-        if (Test-Path -LiteralPath $oldManifest) {
-            $previous = Get-Content -LiteralPath $oldManifest -Raw | ConvertFrom-Json
-            if ($previous.Version -match '^\d+\.\d+\.\d+$') { $previousVersion = $previous.Version }
-        }
-        $archive = Join-Path $projectRoot ('artifacts/installer/history/' + $previousVersion + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8))
-        Assert-SafeTree $releaseRoot
-        Assert-SafeTree $archive
-        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($archive)) | Out-Null
-        # Rename atomically: Move-Item can partially move a tree before a locked directory fails.
-        [IO.Directory]::Move($releaseRoot, $archive)
+
+    # The MSIX packages the installer registers when the shared layout is chosen. Carried rather
+    # than downloaded: an installer that needs the network to reach a usable state fails in a
+    # place nobody can diagnose, and the point of the shared runtime is where the files end up,
+    # not where they came from. They are never installed, so they sit outside both layouts.
+    $assets = Get-Content -LiteralPath (Join-Path $projectRoot 'src/Downlism.App/obj/project.assets.json') -Raw | ConvertFrom-Json
+    $runtimePackage = $assets.libraries.PSObject.Properties.Name | Where-Object { $_ -like 'Microsoft.WindowsAppSDK.Runtime/*' } | Select-Object -First 1
+    if (!$runtimePackage) { throw 'Microsoft.WindowsAppSDK.Runtime was not restored; cannot find the MSIX packages.' }
+    $nugetRoot = if ($env:NUGET_PACKAGES) { $env:NUGET_PACKAGES } else { Join-Path $env:USERPROFILE '.nuget/packages' }
+    $msixSource = Join-Path $nugetRoot ($runtimePackage.ToLowerInvariant() + '/tools/MSIX/win10-x64')
+    if (!(Test-Path -LiteralPath $msixSource)) { throw "MSIX packages not found at $msixSource" }
+    $msixTarget = Join-Path $payload 'runtime'
+    [IO.Directory]::CreateDirectory($msixTarget) | Out-Null
+    foreach ($msix in Get-ChildItem -LiteralPath $msixSource -Filter '*.msix' -File) {
+        Copy-Item -LiteralPath $msix.FullName -Destination $msixTarget
     }
+    if (!(Test-Path -LiteralPath (Join-Path $msixTarget 'Microsoft.WindowsAppRuntime.2.msix'))) {
+        throw 'Missing the Windows App Runtime framework package.'
+    }
+
+    $archiveFile = Join-Path $work 'payload.zip'
+    [IO.Compression.ZipFile]::CreateFromDirectory($payload, $archiveFile, [IO.Compression.CompressionLevel]::Optimal, $false)
+
+    # The launcher carries its own .NET runtime: it runs before anything has been unpacked, on a
+    # machine that may have no .NET at all.
+    $launcher = Join-Path $work 'launcher'
+    Invoke-Dotnet @('publish', 'src/Downlism.Bootstrap/Downlism.Bootstrap.csproj', '-c', 'Release', "-p:AppVersion=$Version", '-o', $launcher)
+
+    # Appended after the published executable rather than embedded in it: the payload is most of
+    # two hundred megabytes of already-compressed binaries, and putting that through the compiler
+    # and the single-file bundler costs minutes and a great deal of memory for a byte-identical
+    # result. The single-file bundle is located from a header written into the host at publish
+    # time, so trailing bytes do not disturb it. Payload.cs reads the trailer back.
+    $staged = Join-Path $work 'Downlism.Setup.exe'
+    Copy-Item -LiteralPath (Join-Path $launcher 'Downlism.Setup.exe') -Destination $staged
+    $source = [IO.File]::OpenRead($archiveFile)
+    $output = [IO.File]::Open($staged, [IO.FileMode]::Append)
     try {
-        Assert-SafeTree $stagedRelease
-        Assert-SafeTree $releaseRoot
-        if ($emptyRelease) {
-            # Recover an empty directory left by an older partial Move-Item operation.
-            Copy-Item -Path (Join-Path $stagedRelease '*') -Destination $releaseRoot -Recurse -Force
-        } else {
-            [IO.Directory]::Move($stagedRelease, $releaseRoot)
-        }
-    } catch {
-        if ($archive -and !(Test-Path -LiteralPath $releaseRoot)) {
-            Assert-SafeTree $archive
-            Assert-SafeTree $releaseRoot
-            Move-Item -LiteralPath $archive -Destination $releaseRoot
-        }
-        throw
+        $length = $source.Length
+        $source.CopyTo($output)
+        $output.Write([BitConverter]::GetBytes([long]$length), 0, 8)
+        $output.Write([Text.Encoding]::ASCII.GetBytes('DOWNLISM-PAYLOAD'), 0, 16)
+    } finally {
+        $output.Dispose()
+        $source.Dispose()
     }
-    Write-Output "Installer folder: $releaseRoot"
-    Write-Output "Run Downlism.Setup.exe (version $Version)."
-    if ($archive) { Write-Output "Previous installer preserved: $archive" }
+
+    # Finish the entire release before touching the published installer. Old ones are archived.
+    if (Test-Path -LiteralPath $releaseExe) {
+        $history = Join-Path $installerRoot 'history'
+        [IO.Directory]::CreateDirectory($history) | Out-Null
+        $archived = Join-Path $history ('Downlism.Setup-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.exe')
+        Move-Item -LiteralPath $releaseExe -Destination $archived
+        Write-Output "Previous installer preserved: $archived"
+    }
+    [IO.Directory]::CreateDirectory($installerRoot) | Out-Null
+    Move-Item -LiteralPath $staged -Destination $releaseExe
+
+    $megabytes = [math]::Round((Get-Item -LiteralPath $releaseExe).Length / 1MB, 1)
+    Write-Output "Installer: $releaseExe ($megabytes MB, version $Version)"
+    Write-Output "Stored once instead of twice: $shared files shared between the two layouts."
+    Write-Output 'It registers the shared Windows App SDK runtime when that is wanted and possible, and installs the self-contained layout when it is not.'
 } finally {
     Pop-Location
     if (Test-Path -LiteralPath $work) {

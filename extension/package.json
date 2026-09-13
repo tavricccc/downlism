@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "tsc -p tsconfig.test.json && node --test tests/links.test.mjs"
+    "test": "tsc -p tsconfig.test.json && node --test tests/*.test.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.268",

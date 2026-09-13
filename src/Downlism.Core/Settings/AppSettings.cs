@@ -12,6 +12,19 @@ public sealed record AppSettings
     /// <summary>Offer to take a download link the moment it is copied.</summary>
     public bool WatchClipboard { get; init; }
 
+    /// <summary>
+    /// Show the per-download window when the browser hands a download over, instead of
+    /// starting it straight away. On by default: a download that appears in a list nobody has
+    /// open is indistinguishable from one that never happened.
+    /// </summary>
+    public bool PromptOnCapture { get; init; } = true;
+
+    /// <summary>
+    /// Where downloads go. Null means the profile's Downloads folder; a value is remembered
+    /// from the last folder chosen in the per-download window.
+    /// </summary>
+    public string? DownloadFolder { get; init; }
+
     public int Connections { get; init; } = 8;
 
     public long BytesPerSecond { get; init; }

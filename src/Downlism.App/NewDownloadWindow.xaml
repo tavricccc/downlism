@@ -1,0 +1,198 @@
+<Window
+    x:Class="Downlism.App.NewDownloadWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Downlism.App.Controls"
+    Title="新增下載">
+
+    <Grid x:Name="Root">
+        <Grid x:Name="PromptContainer">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+        <!-- The fields are a label column and a value column, nothing else. A dialog that
+             appears unasked for, several times an hour, has to be readable in one glance and
+             must never make the person hunt for the button they always press. -->
+        <Grid Padding="24,20,24,16" RowSpacing="14" ColumnSpacing="16">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="52" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Text="檔名" VerticalAlignment="Center"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Grid Grid.Column="1" ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- The same mark the list uses, so the dialog and the row agree about what
+                     kind of transfer this is before it has started. -->
+                <Border x:Name="KindChip" VerticalAlignment="Center" CornerRadius="4" Padding="6,2"
+                        Background="{ThemeResource ControlAltFillColorSecondaryBrush}"
+                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="1">
+                    <TextBlock x:Name="KindLabel" FontSize="11"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Border>
+
+                <TextBox x:Name="FileName" Grid.Column="1" AutomationProperties.Name="檔名" />
+            </Grid>
+
+            <TextBlock Grid.Row="1" Text="來源" VerticalAlignment="Top" Margin="0,3,0,0"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <!-- Selectable, because the first thing anyone does with a URL they did not expect
+                 is copy it somewhere to look at it. -->
+            <TextBlock x:Name="Source" Grid.Row="1" Grid.Column="1" IsTextSelectionEnabled="True"
+                       TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
+                       AutomationProperties.Name="來源網址" />
+
+            <TextBlock Grid.Row="2" Text="大小" VerticalAlignment="Center"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="Size" Grid.Row="2" Grid.Column="1" VerticalAlignment="Center"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+            <TextBlock Grid.Row="3" Text="存到" VerticalAlignment="Center"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Grid Grid.Row="3" Grid.Column="1" ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBox x:Name="Folder" IsReadOnly="True" AutomationProperties.Name="儲存資料夾" />
+                <Button Grid.Column="1" Content="瀏覽…" Click="BrowseClick" AutomationProperties.Name="選擇資料夾" />
+            </Grid>
+
+            <CheckBox x:Name="SortIntoCategories" Grid.Row="4" Grid.Column="1" Content="依類型分類存放"
+                      AutomationProperties.Name="依類型分類存放" />
+        </Grid>
+
+        <!-- A quiet footer strip, separated by a hairline rather than a panel. -->
+        <Border Grid.Row="1" BorderThickness="0,1,0,0" Padding="24,14"
+                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                Background="{ThemeResource LayerFillColorDefaultBrush}">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <CheckBox x:Name="StopAsking" VerticalAlignment="Center" MinWidth="0"
+                          Content="以後由瀏覽器接手時直接開始"
+                          AutomationProperties.Name="以後由瀏覽器接手時直接開始" />
+
+                <Button Grid.Column="1" Content="取消" Click="CancelClick" AutomationProperties.Name="取消" />
+                <Button Grid.Column="2" Content="稍後下載" Click="LaterClick"
+                        ToolTipService.ToolTip="加入清單但先不開始"
+                        AutomationProperties.Name="稍後下載" />
+                <Button Grid.Column="3" Content="開始下載" Click="StartClick"
+                        Style="{ThemeResource AccentButtonStyle}" AutomationProperties.Name="開始下載" />
+            </Grid>
+        </Border>
+    </Grid>
+
+    <!-- 2. Download Progress & Completion View (IDM style) -->
+    <Grid x:Name="ProgressContainer" Visibility="Collapsed">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Padding="24,20,24,16" RowSpacing="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Top row: Kind chip + File name -->
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border x:Name="ProgressKindChip" VerticalAlignment="Center" CornerRadius="4" Padding="6,2"
+                        Background="{ThemeResource ControlAltFillColorSecondaryBrush}"
+                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="1">
+                    <TextBlock x:Name="ProgressKindLabel" FontSize="11"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Border>
+
+                <TextBlock x:Name="ProgressFileName" Grid.Column="1" FontSize="14" FontWeight="SemiBold"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+            </Grid>
+
+            <!-- Row 1: Save folder -->
+            <TextBlock Grid.Row="1" x:Name="ProgressFolder" FontSize="12"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       TextTrimming="CharacterEllipsis" />
+
+            <!-- Row 2: Metrics (Size, Speed, Remaining) -->
+            <Grid Grid.Row="2" Margin="0,4,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock x:Name="ProgressSize" FontSize="12"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Grid.Column="1" x:Name="ProgressSpeed" FontSize="12" FontWeight="SemiBold"
+                           HorizontalAlignment="Center" />
+                <TextBlock Grid.Column="2" x:Name="ProgressRemaining" FontSize="12"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           HorizontalAlignment="Right" />
+            </Grid>
+
+            <!-- Row 3: Segment Ribbon from main window -->
+            <controls:SegmentRibbon Grid.Row="3" x:Name="ProgressRibbon" HorizontalAlignment="Stretch" Margin="0,2,0,2" />
+
+            <!-- Row 4: Status text -->
+            <TextBlock Grid.Row="4" x:Name="ProgressStatus" FontSize="12"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       TextTrimming="CharacterEllipsis" />
+        </Grid>
+
+        <!-- Progress Footer -->
+        <Border Grid.Row="1" BorderThickness="0,1,0,0" Padding="24,14"
+                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                Background="{ThemeResource LayerFillColorDefaultBrush}">
+            <Grid>
+                <!-- Running actions: Pause / Resume, Cancel -->
+                <StackPanel x:Name="RunningActions" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                    <Button x:Name="PauseResumeButton" Content="暫停" Click="PauseResumeClick" AutomationProperties.Name="暫停" />
+                    <Button x:Name="CancelDownloadButton" Content="取消下載" Click="CancelDownloadClick" AutomationProperties.Name="取消下載" />
+                </StackPanel>
+
+                <!-- Completed actions: Open file, Open folder, Close -->
+                <StackPanel x:Name="CompletedActions" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Visibility="Collapsed">
+                    <Button x:Name="OpenFolderButton" Content="開啟資料夾" Click="OpenFolderClick" AutomationProperties.Name="開啟資料夾" />
+                    <Button x:Name="OpenFileButton" Content="開啟檔案" Style="{ThemeResource AccentButtonStyle}" Click="OpenFileClick" AutomationProperties.Name="開啟檔案" />
+                    <Button x:Name="CloseCompleteButton" Content="關閉" Click="CloseCompleteClick" AutomationProperties.Name="關閉" />
+                </StackPanel>
+
+                <!-- Failed actions: Retry, Close -->
+                <StackPanel x:Name="FailedActions" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Visibility="Collapsed">
+                    <Button x:Name="RetryButton" Content="重試" Style="{ThemeResource AccentButtonStyle}" Click="RetryClick" AutomationProperties.Name="重試" />
+                    <Button x:Name="CloseFailedButton" Content="關閉" Click="CloseCompleteClick" AutomationProperties.Name="關閉" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+    </Grid>
+</Window>

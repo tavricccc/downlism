@@ -19,10 +19,13 @@
    </StackPanel>
   </ScrollViewer>
   <Border Grid.Row="1" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" Padding="40,20">
-   <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
-    <Button FontFamily="Microsoft JhengHei UI" x:Name="CloseButton" Content="取消" MinWidth="96" Click="CloseClick" />
-    <Button FontFamily="Microsoft JhengHei UI" x:Name="ActionButton" Content="安裝" MinWidth="120" Style="{ThemeResource AccentButtonStyle}" Click="ActionClick" />
-   </StackPanel>
+   <Grid>
+    <Button FontFamily="Microsoft JhengHei UI" x:Name="UninstallLink" Content="解除安裝 Downlism" Visibility="Collapsed" Click="UninstallLinkClick" HorizontalAlignment="Left" />
+    <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Right">
+     <Button FontFamily="Microsoft JhengHei UI" x:Name="CloseButton" Content="取消" MinWidth="96" Click="CloseClick" />
+     <Button FontFamily="Microsoft JhengHei UI" x:Name="ActionButton" Content="安裝" MinWidth="120" Style="{ThemeResource AccentButtonStyle}" Click="ActionClick" />
+    </StackPanel>
+   </Grid>
   </Border>
  </Grid>
 </Window>

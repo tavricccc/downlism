@@ -12,8 +12,7 @@ namespace Downlism.App.Services;
 /// a dead pipe.
 /// </remarks>
 public sealed class IngestListener(
-    DownloadQueue queue,
-    Action<DownloadJob> onAccepted,
+    Action<CaptureRequest> onCapture,
     Func<Core.Settings.AppSettings> settings) : IDisposable
 {
     private readonly CancellationTokenSource _shutdown = new();
@@ -76,26 +75,42 @@ public sealed class IngestListener(
 
         // The URL arrives from a web page by way of the extension, so it is validated here
         // rather than trusted because it came through a named pipe.
-        if (!message.TryGetUri(out var uri)) return IngestReply.Rejected("Only http and https downloads are accepted.");
+        if (!message.TryGetUri(out var uri))
+        {
+            return IngestReply.Rejected("Only http, https and magnet links are accepted.");
+        }
 
         var current = settings();
+        var kind = message.KindFor(uri);
 
-        var job = queue.Add(new DownloadRequest
+        // Handed on rather than started here. The browser is waiting on this reply and must not
+        // be made to wait on a person, so the capture is always accepted and what happens to it
+        // is decided in the window that opens next.
+        var request = new DownloadRequest
         {
             Uri = uri,
-            Directory = DownloadFolder(),
+            Kind = kind,
+            // Only carried for media. Handing a page address to the other two engines would
+            // make them download the page instead of the thing on it.
+            PageUrl = kind == TransferKind.Media ? message.PageUrl : null,
+            Directory = DownloadFolder(current),
             // Browser handovers are sorted the same way as pasted links; a file arriving from
             // Chrome should not land somewhere different from the same file pasted by hand.
             SortIntoCategories = current.SortIntoCategories,
-            FileName = string.IsNullOrWhiteSpace(message.FileName) ? null : message.FileName,
+            // A torrent names itself, and the browser's guess for one would be the .torrent
+            // file rather than its contents. For media the name is only a label until yt-dlp
+            // reports the real one, and the page title it carries beats a manifest URL.
+            FileName = kind == TransferKind.Torrent || string.IsNullOrWhiteSpace(message.FileName)
+                ? null
+                : message.FileName,
             Connections = current.Connections,
             BytesPerSecond = current.BytesPerSecond,
             Cookies = message.Cookies,
             Referrer = message.Referrer,
             UserAgent = message.UserAgent,
-        });
+        };
 
-        onAccepted(job);
+        onCapture(new CaptureRequest(request, message.TotalBytes));
         return IngestReply.Ok();
     }
 
@@ -108,6 +123,10 @@ public sealed class IngestListener(
         var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         return Path.Combine(profile, "Downloads");
     }
+
+    /// <summary>The folder the user last chose, falling back to the shell's Downloads folder.</summary>
+    public static string DownloadFolder(Core.Settings.AppSettings settings) =>
+        string.IsNullOrWhiteSpace(settings.DownloadFolder) ? DownloadFolder() : settings.DownloadFolder;
 
     public void Dispose()
     {
@@ -124,3 +143,10 @@ public sealed class IngestListener(
         _shutdown.Dispose();
     }
 }
+
+/// <summary>
+/// A download that has been captured but not yet started, plus what the browser claimed about
+/// its size. The size is a hint for the window to show and never reaches an engine: the
+/// servers that lie about Content-Length are the same ones that lie about everything else.
+/// </summary>
+public sealed record CaptureRequest(DownloadRequest Request, long ExpectedBytes);

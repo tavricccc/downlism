@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <ApplicationIcon>..\..\docs\assets\downlism.ico</ApplicationIcon>
+    <ApplicationManifest>..\Downlism.App\app.manifest</ApplicationManifest>
+    <AssemblyName>Uninstall</AssemblyName>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Downlism.Core\Downlism.Core.csproj" />
+  </ItemGroup>
+</Project>
