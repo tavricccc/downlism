@@ -44,8 +44,17 @@ public static class InstallationUpdate
             throw new IOException("目標資料夾不是受管理的 Downlism 安裝。");
         var changed = next.Files.Where(pair => !Matches(InstallFiles.Resolve(target, pair.Key), pair.Value)).Select(pair => pair.Key).ToList();
         foreach (var name in next.Files.Keys)
+        {
             if (File.Exists(InstallFiles.Resolve(target, name)) && previous is not null && !previous.Files.ContainsKey(name))
+            {
+                if (name.StartsWith("Uninstall.", StringComparison.OrdinalIgnoreCase) ||
+                    name.StartsWith(next.Product + ".", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
                 throw new IOException($"更新會覆蓋自行加入的檔案：{name}");
+            }
+        }
         var removed = previous?.Files.Keys.Where(name => !next.Files.ContainsKey(name)).ToArray() ?? [];
         var parent = Path.GetDirectoryName(target)!;
         var work = Path.Combine(parent, ".downlism-update-" + Guid.NewGuid().ToString("N"));
