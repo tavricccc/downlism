@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://tavricccc.github.io/downlism/sitemap.xml
