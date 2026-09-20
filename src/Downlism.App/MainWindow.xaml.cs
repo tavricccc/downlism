@@ -135,7 +135,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private DownloadJob Accept(DownloadRequest request, bool start)
     {
-        RememberFolder(request.Directory);
+        RememberDownloadDefaults(request);
 
         var job = start
             ? App.Queue.Add(request)
@@ -154,14 +154,26 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// The folder chosen in the prompt becomes the default for the next one. Choosing the same
-    /// folder repeatedly is the commonest thing anyone does in a dialog like this.
+    /// The choices made in the prompt become the defaults for the next one. They are only
+    /// remembered after Start or Later, so cancelling a prompt never changes preferences.
     /// </summary>
-    private void RememberFolder(string directory)
+    private void RememberDownloadDefaults(DownloadRequest request)
     {
-        if (string.IsNullOrWhiteSpace(directory) || directory == _settings.DownloadFolder) return;
+        var updated = _settings;
+        if (!string.IsNullOrWhiteSpace(request.Directory) && request.Directory != updated.DownloadFolder)
+        {
+            updated = updated with { DownloadFolder = request.Directory };
+        }
 
-        _settings = _settings with { DownloadFolder = directory };
+        if (request.SortIntoCategories != updated.SortIntoCategories)
+        {
+            updated = updated with { SortIntoCategories = request.SortIntoCategories };
+            SortIntoCategories.IsChecked = request.SortIntoCategories;
+        }
+
+        if (updated == _settings) return;
+
+        _settings = updated;
         _settings.Save();
     }
 
