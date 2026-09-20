@@ -67,6 +67,15 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
     [ObservableProperty]
     public partial bool IsFinished { get; set; }
 
+    [ObservableProperty]
+    public partial bool CanCancel { get; set; }
+
+    [ObservableProperty]
+    public partial bool CanRemove { get; set; } = true;
+
+    [ObservableProperty]
+    public partial bool ShowProgress { get; set; } = true;
+
     public void Refresh()
     {
         var progress = job.Progress;
@@ -114,7 +123,15 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
         CanPause = job.State is DownloadState.Running or DownloadState.Queued or DownloadState.Retrying;
         CanResume = job.State is DownloadState.Paused or DownloadState.Failed;
         IsFinished = job.State == DownloadState.Completed;
+        CanCancel = IsActive(job.State);
+        CanRemove = !CanCancel;
+        // A full green segmented ribbon repeats what "已完成" already says and makes a long
+        // history visually louder than the transfers that still need attention.
+        ShowProgress = job.State != DownloadState.Completed;
     }
+
+    private static bool IsActive(DownloadState state) =>
+        state is DownloadState.Queued or DownloadState.Running or DownloadState.Retrying;
 
     /// <summary>Lets x:Bind drive visibility without a converter resource.</summary>
     public static Visibility ShowIf(bool value) => value ? Visibility.Visible : Visibility.Collapsed;

@@ -166,6 +166,26 @@
         <ListView x:Name="Downloads" Grid.Row="2" SelectionMode="None"
                   Padding="8,0,8,12" ScrollViewer.HorizontalScrollMode="Disabled"
                   AutomationProperties.Name="下載清單">
+            <ListView.Header>
+                <!-- Labels make the fixed numeric columns self-explanatory without repeating
+                     units in every row. Their widths exactly match the row grid below. -->
+                <Grid Margin="12,0,12,6" ColumnSpacing="16">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="132" />
+                        <ColumnDefinition Width="92" />
+                        <ColumnDefinition Width="104" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="檔案" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Grid.Column="1" Text="大小" HorizontalAlignment="Right"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Grid.Column="2" Text="速度" HorizontalAlignment="Right"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Grid.Column="3" Text="剩餘時間" HorizontalAlignment="Right"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Grid>
+            </ListView.Header>
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -250,6 +270,14 @@
                                         <FontIcon FontSize="14" Glyph="&#xE838;" />
                                     </Button>
                                     <Button Click="RemoveClick" Tag="{x:Bind Id}"
+                                            Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(CanCancel), Mode=OneWay}"
+                                            Style="{StaticResource RowActionButtonStyle}"
+                                            AutomationProperties.Name="取消下載"
+                                            ToolTipService.ToolTip="取消下載並從清單移除">
+                                        <TextBlock Text="取消" FontSize="12" />
+                                    </Button>
+                                    <Button Click="RemoveClick" Tag="{x:Bind Id}"
+                                            Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(CanRemove), Mode=OneWay}"
                                             Style="{StaticResource RowActionButtonStyle}"
                                             AutomationProperties.Name="移除" ToolTipService.ToolTip="從清單移除">
                                         <FontIcon FontSize="14" Glyph="&#xE711;" />
@@ -261,6 +289,7 @@
                                                     Segments="{x:Bind Segments, Mode=OneWay}"
                                                     Fraction="{x:Bind Fraction, Mode=OneWay}"
                                                     Tone="{x:Bind Tone, Mode=OneWay}"
+                                                    Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(ShowProgress), Mode=OneWay}"
                                                     HorizontalAlignment="Stretch" />
 
                             <TextBlock Grid.Row="2" Text="{x:Bind Status, Mode=OneWay}"
