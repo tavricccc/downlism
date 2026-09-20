@@ -14,6 +14,7 @@ namespace Downlism.App;
 public sealed partial class MainWindow : Window
 {
     private readonly ObservableCollection<DownloadRowViewModel> _rows = [];
+    private readonly ObservableCollection<DownloadRowViewModel> _visibleRows = [];
     private readonly Dictionary<Guid, DownloadRowViewModel> _byId = [];
     private readonly DispatcherQueue _dispatcher;
     private readonly DownloadStore _store = new(DownloadStore.DefaultPath);
@@ -34,7 +35,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
 
         _dispatcher = DispatcherQueue.GetForCurrentThread();
-        Downloads.ItemsSource = _rows;
+        Downloads.ItemsSource = _visibleRows;
 
         SystemBackdrop = new Microsoft.UI.Xaml.Media.MicaBackdrop();
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1040, 660));
@@ -69,7 +70,7 @@ public sealed partial class MainWindow : Window
         if (_settings.WatchClipboard) Clipboard.ContentChanged += OnClipboardChanged;
 
         RestoreHistory();
-        UpdateEmptyState();
+        RefreshDownloadView();
     }
 
     /// <summary>
@@ -186,11 +187,12 @@ public sealed partial class MainWindow : Window
             _rows.Remove(row);
             _byId.Remove(job.Id);
             _store.Delete(job.Id);
-            UpdateEmptyState();
+            RefreshDownloadView();
             return;
         }
 
         row.Refresh();
+        RefreshDownloadView();
 
         // Only settled states are written back. Persisting every progress sample would put a
         // database write on a path that fires four times a second per transfer.
@@ -210,7 +212,7 @@ public sealed partial class MainWindow : Window
         _byId[job.Id] = row;
 
         if (remember) Remember(job);
-        UpdateEmptyState();
+        RefreshDownloadView();
     }
 
     private void Remember(DownloadJob job) => _store.Save(new StoredDownload(
@@ -225,10 +227,74 @@ public sealed partial class MainWindow : Window
         job.Request.Kind,
         job.Request.PageUrl));
 
-    private void UpdateEmptyState()
+    private void RefreshDownloadView()
     {
-        EmptyState.Visibility = _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        Downloads.Visibility = _rows.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        var filter = SelectedFilter();
+        var wanted = _rows.Where(row => MatchesFilter(row.Job.State, filter)).ToArray();
+
+        // Progress updates arrive several times a second. Rebuild only when a row crosses a
+        // filter boundary, otherwise the list would lose hover/focus state while bytes move.
+        if (!_visibleRows.SequenceEqual(wanted))
+        {
+            _visibleRows.Clear();
+            foreach (var row in wanted) _visibleRows.Add(row);
+        }
+
+        var active = _rows.Count(row => IsActive(row.Job.State));
+        var completed = _rows.Count(row => row.Job.State == DownloadState.Completed);
+        var speed = _rows
+            .Where(row => row.Job.State == DownloadState.Running)
+            .Sum(row => row.Job.Progress?.BytesPerSecond ?? 0);
+
+        Summary.Text = active > 0
+            ? $"{active} 個進行中 · {DownloadRowViewModel.Bytes((long)speed)}/s · {_rows.Count} 個下載"
+            : $"{_rows.Count} 個下載";
+        PauseAllButton.IsEnabled = active > 0;
+        ClearCompletedButton.IsEnabled = completed > 0;
+
+        var empty = _visibleRows.Count == 0;
+        EmptyState.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
+        Downloads.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
+
+        (EmptyTitle.Text, EmptyDescription.Text) = _rows.Count == 0
+            ? ("還沒有下載", "貼上下載連結、影片頁面網址或磁力連結，或從瀏覽器擴充功能接手下載。")
+            : filter switch
+            {
+                "active" => ("目前沒有進行中的下載", "開始新的下載，或到「需要處理」繼續已暫停的項目。"),
+                "completed" => ("還沒有完成的下載", "下載完成後會集中顯示在這裡。"),
+                "attention" => ("目前沒有需要處理的下載", "已暫停或失敗的項目會顯示在這裡。"),
+                _ => ("這個檢視沒有下載", "切換篩選條件即可查看其他下載。"),
+            };
+    }
+
+    private string SelectedFilter() =>
+        StatusFilter.SelectedItem is ComboBoxItem { Tag: string tag } ? tag : "all";
+
+    private static bool MatchesFilter(DownloadState state, string filter) => filter switch
+    {
+        "active" => IsActive(state),
+        "completed" => state == DownloadState.Completed,
+        "attention" => state is DownloadState.Paused or DownloadState.Failed,
+        _ => state != DownloadState.Removed,
+    };
+
+    private static bool IsActive(DownloadState state) =>
+        state is DownloadState.Queued or DownloadState.Running or DownloadState.Retrying;
+
+    private void StatusFilterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_ready) RefreshDownloadView();
+    }
+
+    private void ClearCompletedClick(object sender, RoutedEventArgs e)
+    {
+        foreach (var id in _rows
+                     .Where(row => row.Job.State == DownloadState.Completed)
+                     .Select(row => row.Id)
+                     .ToArray())
+        {
+            App.Queue.Remove(id);
+        }
     }
 
     private async void PasteClick(object sender, RoutedEventArgs e)

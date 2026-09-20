@@ -9,6 +9,7 @@
     <Grid x:Name="Root" RowSpacing="0">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -43,7 +44,8 @@
                 </StackPanel>
             </Button>
 
-            <Button Grid.Column="2" Content="全部暫停" Click="PauseAllClick" AutomationProperties.Name="全部暫停" />
+            <Button x:Name="PauseAllButton" Grid.Column="2" Content="全部暫停" Click="PauseAllClick"
+                    AutomationProperties.Name="全部暫停" />
 
             <Button Grid.Column="4" Click="ExtensionGuideClick" AutomationProperties.Name="瀏覽器擴充功能"
                     ToolTipService.ToolTip="怎麼把擴充功能裝進 Chrome 或 Edge">
@@ -123,19 +125,45 @@
             </Button>
         </Grid>
 
+        <!-- Keep history navigable without turning the command bar into a row of permanent
+             tabs. The summary answers the two questions that matter at a glance: how many are
+             active and how much bandwidth they are using. -->
+        <Grid Grid.Row="1" Padding="20,0,20,12" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <ComboBox x:Name="StatusFilter" MinWidth="150" SelectedIndex="0"
+                      SelectionChanged="StatusFilterChanged" AutomationProperties.Name="下載狀態篩選">
+                <ComboBoxItem Content="全部下載" Tag="all" />
+                <ComboBoxItem Content="進行中" Tag="active" />
+                <ComboBoxItem Content="已完成" Tag="completed" />
+                <ComboBoxItem Content="需要處理" Tag="attention" />
+            </ComboBox>
+
+            <TextBlock x:Name="Summary" Grid.Column="1" VerticalAlignment="Center"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                       AutomationProperties.LiveSetting="Polite" />
+
+            <Button x:Name="ClearCompletedButton" Grid.Column="2" Content="清除已完成"
+                    Click="ClearCompletedClick" AutomationProperties.Name="從清單清除已完成下載" />
+        </Grid>
+
         <!-- An empty list is an invitation, not a shrug. -->
-        <StackPanel x:Name="EmptyState" Grid.Row="1" Spacing="10" Padding="40"
+        <StackPanel x:Name="EmptyState" Grid.Row="2" Spacing="10" Padding="40"
                     VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420">
             <Image Source="ms-appx:///Assets/Downlism.png" Width="56" Height="56" Opacity="0.9"
                    HorizontalAlignment="Center" AutomationProperties.Name="Downlism" />
-            <TextBlock Text="還沒有下載" HorizontalAlignment="Center"
+            <TextBlock x:Name="EmptyTitle" Text="還沒有下載" HorizontalAlignment="Center"
                        Style="{ThemeResource SubtitleTextBlockStyle}" />
-            <TextBlock TextWrapping="Wrap" TextAlignment="Center"
+            <TextBlock x:Name="EmptyDescription" TextWrapping="Wrap" TextAlignment="Center"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                        Text="複製下載連結、影片頁面網址或磁力連結，再按上方的貼上按鈕。裝上 Chrome、Edge 的 Downlism 擴充功能後，網頁上的影片也會被找出來，交給這裡下載。" />
         </StackPanel>
 
-        <ListView x:Name="Downloads" Grid.Row="1" SelectionMode="None"
+        <ListView x:Name="Downloads" Grid.Row="2" SelectionMode="None"
                   Padding="8,0,8,12" ScrollViewer.HorizontalScrollMode="Disabled"
                   AutomationProperties.Name="下載清單">
             <ListView.ItemContainerStyle>
@@ -244,6 +272,6 @@
             </ListView.ItemTemplate>
         </ListView>
 
-        <InfoBar x:Name="Notice" Grid.Row="2" IsOpen="False" IsClosable="True" Margin="20,0,20,16" />
+        <InfoBar x:Name="Notice" Grid.Row="3" IsOpen="False" IsClosable="True" Margin="20,0,20,16" />
     </Grid>
 </Window>
