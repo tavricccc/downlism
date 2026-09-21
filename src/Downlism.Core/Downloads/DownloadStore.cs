@@ -13,7 +13,9 @@ public sealed record StoredDownload(
     string? Path,
     DateTimeOffset CreatedAt,
     TransferKind Kind = TransferKind.Http,
-    string? PageUrl = null);
+    string? PageUrl = null,
+    MediaOutput MediaOutput = MediaOutput.Video,
+    int? MediaQuality = null);
 
 /// <summary>
 /// The list of downloads, kept across restarts.
@@ -56,10 +58,12 @@ public sealed class DownloadStore
 
         AddColumnIfMissing(connection, "kind");
         AddColumnIfMissing(connection, "page_url");
+        AddColumnIfMissing(connection, "media_output");
+        AddColumnIfMissing(connection, "media_quality");
     }
 
     /// <summary>
-    /// Widens an existing table in place. A database written by 0.3 has neither column, and
+    /// Widens an existing table in place. Older databases lack newer request options, and
     /// recreating the table would throw away the list a person already has.
     /// </summary>
     private static void AddColumnIfMissing(SqliteConnection connection, string column)
@@ -71,7 +75,7 @@ public sealed class DownloadStore
         if (Convert.ToInt64(existing.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture) > 0) return;
 
         using var add = connection.CreateCommand();
-        // The column name is one of two literals chosen in this file, never anything a caller
+        // The column name comes only from literals in this file, never anything a caller
         // supplies, so interpolating it cannot be turned into an injection.
         add.CommandText = $"ALTER TABLE downloads ADD COLUMN {column} TEXT;";
         add.ExecuteNonQuery();
@@ -88,9 +92,11 @@ public sealed class DownloadStore
         using var command = connection.CreateCommand();
         command.CommandText = """
             INSERT INTO downloads
-                (id, url, directory, file_name, referrer, state, path, created_at, kind, page_url)
+                (id, url, directory, file_name, referrer, state, path, created_at, kind, page_url,
+                 media_output, media_quality)
             VALUES
-                ($id, $url, $directory, $fileName, $referrer, $state, $path, $createdAt, $kind, $pageUrl)
+                ($id, $url, $directory, $fileName, $referrer, $state, $path, $createdAt, $kind, $pageUrl,
+                 $mediaOutput, $mediaQuality)
             ON CONFLICT(id) DO UPDATE SET state = excluded.state, path = excluded.path;
             """;
 
@@ -104,6 +110,8 @@ public sealed class DownloadStore
         command.Parameters.AddWithValue("$createdAt", download.CreatedAt.ToString("O"));
         command.Parameters.AddWithValue("$kind", download.Kind.ToString());
         command.Parameters.AddWithValue("$pageUrl", (object?)download.PageUrl ?? DBNull.Value);
+        command.Parameters.AddWithValue("$mediaOutput", download.MediaOutput.ToString());
+        command.Parameters.AddWithValue("$mediaQuality", (object?)download.MediaQuality ?? DBNull.Value);
         command.ExecuteNonQuery();
     }
 
@@ -122,7 +130,8 @@ public sealed class DownloadStore
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT id, url, directory, file_name, referrer, state, path, created_at, kind, page_url
+            SELECT id, url, directory, file_name, referrer, state, path, created_at, kind, page_url,
+                   media_output, media_quality
             FROM downloads ORDER BY created_at DESC LIMIT 500;
             """;
 
@@ -144,7 +153,11 @@ public sealed class DownloadStore
                 !reader.IsDBNull(8) && Enum.TryParse<TransferKind>(reader.GetString(8), out var kind)
                     ? kind
                     : TransferKind.Http,
-                reader.IsDBNull(9) ? null : reader.GetString(9)));
+                reader.IsDBNull(9) ? null : reader.GetString(9),
+                !reader.IsDBNull(10) && Enum.TryParse<MediaOutput>(reader.GetString(10), out var output)
+                    ? output
+                    : MediaOutput.Video,
+                reader.IsDBNull(11) ? null : reader.GetInt32(11)));
         }
 
         return results;

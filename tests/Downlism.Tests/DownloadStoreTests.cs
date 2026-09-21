@@ -78,6 +78,29 @@ public sealed class DownloadStoreTests : IDisposable
     }
 
     [Fact]
+    public void RemembersMediaOutputAndQuality()
+    {
+        var media = new StoredDownload(
+            Guid.NewGuid(),
+            "https://example.com/watch/7",
+            @"C:\Downloads",
+            "講座",
+            Referrer: null,
+            State: "Paused",
+            Path: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Kind: TransferKind.Media,
+            MediaOutput: MediaOutput.Audio,
+            MediaQuality: 192);
+
+        _store.Save(media);
+
+        var loaded = Assert.Single(_store.Load());
+        Assert.Equal(MediaOutput.Audio, loaded.MediaOutput);
+        Assert.Equal(192, loaded.MediaQuality);
+    }
+
+    [Fact]
     public void ReadsADatabaseWrittenBeforeTheKindColumnExisted()
     {
         // A person upgrading from 0.3 has a table with eight columns. Recreating it would be
@@ -110,6 +133,8 @@ public sealed class DownloadStoreTests : IDisposable
         Assert.Equal("old.zip", loaded.FileName);
         Assert.Equal(TransferKind.Http, loaded.Kind);
         Assert.Null(loaded.PageUrl);
+        Assert.Equal(MediaOutput.Video, loaded.MediaOutput);
+        Assert.Null(loaded.MediaQuality);
     }
 
     [Fact]

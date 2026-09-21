@@ -49,10 +49,10 @@ public sealed class MediaEngine(MediaTools tools) : ITransferEngine
             .EnsureAsync(state.SetNote, new Progress<DownloadProgress>(state.Forward), cancellationToken)
             .ConfigureAwait(false);
 
-        // Media always lands with the videos. The real extension is not known until yt-dlp has
-        // picked a format, and by then the directory has to exist, so the category is decided
-        // from what this engine only ever produces.
-        var directory = DownloadCategory.DirectoryFor(request.Directory, "video.mp4", request.SortIntoCategories);
+        // The real extension is not known until yt-dlp has picked or converted a format, and by
+        // then the directory has to exist, so use the output choice to select its category.
+        var categoryHint = request.MediaOutput == MediaOutput.Audio ? "audio.mp3" : "video.mp4";
+        var directory = DownloadCategory.DirectoryFor(request.Directory, categoryHint, request.SortIntoCategories);
         System.IO.Directory.CreateDirectory(directory);
 
         state.SetNote("正在解析來源");
@@ -141,6 +141,7 @@ public sealed class MediaEngine(MediaTools tools) : ITransferEngine
         ];
 
         foreach (var argument in arguments) info.ArgumentList.Add(argument);
+        foreach (var argument in MediaFormat.ArgumentsFor(request)) info.ArgumentList.Add(argument);
 
         if (request.BytesPerSecond > 0)
         {

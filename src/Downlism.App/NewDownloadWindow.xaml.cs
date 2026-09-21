@@ -185,16 +185,84 @@ public sealed partial class NewDownloadWindow : Window
 
         Size.Text = Describe(request.Kind, _capture.ExpectedBytes);
 
+        var mediaVisibility = request.Kind == TransferKind.Media ? Visibility.Visible : Visibility.Collapsed;
+        MediaTypeLabel.Visibility = mediaVisibility;
+        MediaType.Visibility = mediaVisibility;
+        MediaQualityLabel.Visibility = mediaVisibility;
+        MediaQuality.Visibility = mediaVisibility;
+        if (request.Kind == TransferKind.Media)
+        {
+            MediaType.SelectedIndex = request.MediaOutput == MediaOutput.Audio ? 1 : 0;
+            FillMediaQualities(request.MediaOutput, request.MediaQuality);
+        }
+
         Folder.Text = request.Directory;
         SortIntoCategories.IsChecked = request.SortIntoCategories;
     }
 
     private static string Describe(TransferKind kind, long bytes) => kind switch
     {
-        TransferKind.Media => "開始下載後才會知道（由 yt-dlp 選擇畫質）",
+        TransferKind.Media => "由 yt-dlp 解析來源後才會知道",
         TransferKind.Torrent => "取得種子資訊後才會知道",
         _ => bytes > 0 ? DownloadRowViewModel.Bytes(bytes) : "開始下載後才會知道",
     };
+
+    private void MediaTypeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (MediaType.SelectedItem is not ComboBoxItem { Tag: string tag }
+            || !Enum.TryParse<MediaOutput>(tag, out var output)) return;
+
+        KindLabel.Text = output == MediaOutput.Audio ? "音訊" : "影片";
+        FillMediaQualities(output, selected: null);
+    }
+
+    private void FillMediaQualities(MediaOutput output, int? selected)
+    {
+        (string Label, int? Value)[] choices = output == MediaOutput.Audio
+            ? [("最佳品質", null), ("320 kbps", 320), ("256 kbps", 256), ("192 kbps", 192), ("128 kbps", 128)]
+            : [("最佳畫質", null), ("2160p", 2160), ("1440p", 1440), ("1080p", 1080), ("720p", 720), ("480p", 480), ("360p", 360)];
+
+        MediaQuality.Items.Clear();
+        foreach (var choice in choices)
+        {
+            MediaQuality.Items.Add(new ComboBoxItem
+            {
+                Content = choice.Label,
+                Tag = choice.Value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+            });
+        }
+
+        MediaQuality.SelectedIndex = Array.FindIndex(choices, choice => choice.Value == selected);
+        if (MediaQuality.SelectedIndex < 0) MediaQuality.SelectedIndex = 0;
+    }
+
+    private DownloadRequest RequestFromPrompt()
+    {
+        var request = _capture.Request;
+        var name = FileName.Text.Trim();
+        var output = request.MediaOutput;
+        var quality = request.MediaQuality;
+
+        if (request.Kind == TransferKind.Media
+            && MediaType.SelectedItem is ComboBoxItem { Tag: string outputTag }
+            && Enum.TryParse<MediaOutput>(outputTag, out var selectedOutput))
+        {
+            output = selectedOutput;
+            quality = MediaQuality.SelectedItem is ComboBoxItem { Tag: string qualityTag }
+                && int.TryParse(qualityTag, out var selectedQuality)
+                    ? selectedQuality
+                    : null;
+        }
+
+        return request with
+        {
+            FileName = request.Kind == TransferKind.Http && name.Length > 0 ? name : null,
+            Directory = Folder.Text,
+            SortIntoCategories = SortIntoCategories.IsChecked == true,
+            MediaOutput = output,
+            MediaQuality = quality,
+        };
+    }
 
     private async void BrowseClick(object sender, RoutedEventArgs e)
     {
@@ -223,15 +291,7 @@ public sealed partial class NewDownloadWindow : Window
             presenter.IsMinimizable = true;
         }
 
-        var name = FileName.Text.Trim();
-        var request = _capture.Request with
-        {
-            FileName = _capture.Request.Kind == TransferKind.Http && name.Length > 0 ? name : null,
-            Directory = Folder.Text,
-            SortIntoCategories = SortIntoCategories.IsChecked == true,
-        };
-
-        _job = _accepted(request, true);
+        _job = _accepted(RequestFromPrompt(), true);
 
         // Switch to progress view (like IDM)
         PromptContainer.Visibility = Visibility.Collapsed;
@@ -393,15 +453,7 @@ public sealed partial class NewDownloadWindow : Window
 
         _stopAsking?.Invoke(StopAsking.IsChecked == true);
 
-        var name = FileName.Text.Trim();
-        _accepted(
-            _capture.Request with
-            {
-                FileName = _capture.Request.Kind == TransferKind.Http && name.Length > 0 ? name : null,
-                Directory = Folder.Text,
-                SortIntoCategories = SortIntoCategories.IsChecked == true,
-            },
-            false);
+        _accepted(RequestFromPrompt(), false);
 
         Close();
     }
@@ -419,15 +471,7 @@ public sealed partial class NewDownloadWindow : Window
 
         _stopAsking?.Invoke(StopAsking.IsChecked == true);
 
-        var name = FileName.Text.Trim();
-        _accepted(
-            _capture.Request with
-            {
-                FileName = _capture.Request.Kind == TransferKind.Http && name.Length > 0 ? name : null,
-                Directory = Folder.Text,
-                SortIntoCategories = SortIntoCategories.IsChecked == true,
-            },
-            shouldStart);
+        _accepted(RequestFromPrompt(), shouldStart);
 
         Close();
     }

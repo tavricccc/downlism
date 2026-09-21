@@ -22,6 +22,8 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="52" />
@@ -61,9 +63,22 @@
             <TextBlock x:Name="Size" Grid.Row="2" Grid.Column="1" VerticalAlignment="Center"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
 
-            <TextBlock Grid.Row="3" Text="存到" VerticalAlignment="Center"
+            <TextBlock x:Name="MediaTypeLabel" Grid.Row="3" Text="下載" VerticalAlignment="Center"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <Grid Grid.Row="3" Grid.Column="1" ColumnSpacing="10">
+            <ComboBox x:Name="MediaType" Grid.Row="3" Grid.Column="1" HorizontalAlignment="Stretch"
+                      SelectionChanged="MediaTypeChanged" AutomationProperties.Name="下載內容">
+                <ComboBoxItem Content="影片" Tag="Video" />
+                <ComboBoxItem Content="音訊（MP3）" Tag="Audio" />
+            </ComboBox>
+
+            <TextBlock x:Name="MediaQualityLabel" Grid.Row="4" Text="品質" VerticalAlignment="Center"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <ComboBox x:Name="MediaQuality" Grid.Row="4" Grid.Column="1" HorizontalAlignment="Stretch"
+                      AutomationProperties.Name="下載品質" />
+
+            <TextBlock Grid.Row="5" Text="存到" VerticalAlignment="Center"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <Grid Grid.Row="5" Grid.Column="1" ColumnSpacing="10">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -73,7 +88,7 @@
                 <Button Grid.Column="1" Content="瀏覽…" Click="BrowseClick" AutomationProperties.Name="選擇資料夾" />
             </Grid>
 
-            <CheckBox x:Name="SortIntoCategories" Grid.Row="4" Grid.Column="1" Content="依類型分類存放"
+            <CheckBox x:Name="SortIntoCategories" Grid.Row="6" Grid.Column="1" Content="依類型分類存放"
                       AutomationProperties.Name="依類型分類存放" />
         </Grid>
 

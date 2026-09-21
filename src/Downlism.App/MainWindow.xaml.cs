@@ -91,6 +91,8 @@ public sealed partial class MainWindow : Window
                     Uri = uri,
                     Kind = stored.Kind,
                     PageUrl = stored.PageUrl,
+                    MediaOutput = stored.MediaOutput,
+                    MediaQuality = stored.MediaQuality,
                     Directory = stored.Directory,
                     FileName = stored.FileName,
                     // Already the final directory; sorting again would nest a second folder.
@@ -225,7 +227,9 @@ public sealed partial class MainWindow : Window
         job.Path,
         DateTimeOffset.UtcNow,
         job.Request.Kind,
-        job.Request.PageUrl));
+        job.Request.PageUrl,
+        job.Request.MediaOutput,
+        job.Request.MediaQuality));
 
     private void RefreshDownloadView()
     {

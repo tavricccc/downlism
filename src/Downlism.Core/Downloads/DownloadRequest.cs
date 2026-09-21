@@ -15,6 +15,15 @@ public sealed record DownloadRequest
     /// </summary>
     public string? PageUrl { get; init; }
 
+    /// <summary>Whether yt-dlp should keep the video or extract an audio file.</summary>
+    public MediaOutput MediaOutput { get; init; } = MediaOutput.Video;
+
+    /// <summary>
+    /// Maximum video height or MP3 bitrate in kbps. Null asks yt-dlp for its best available
+    /// quality without imposing a ceiling.
+    /// </summary>
+    public int? MediaQuality { get; init; }
+
     /// <summary>
     /// Where the file goes. When <see cref="SortIntoCategories"/> is set this is the root the
     /// category folder is created under, not the final directory.
@@ -51,6 +60,12 @@ public sealed record DownloadRequest
 /// A progress sample. <see cref="Segments"/> carries the live per-connection state so the UI
 /// can show where each connection has reached, rather than one averaged bar.
 /// </summary>
+public enum MediaOutput
+{
+    Video,
+    Audio,
+}
+
 public sealed record DownloadProgress(
     long CompletedBytes,
     long? TotalBytes,
