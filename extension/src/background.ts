@@ -24,6 +24,12 @@
  */
 
 import { classify, isPageOnlyHost, merge, type FoundMedia } from "./media.js";
+import {
+  extensionForMime,
+  isPageManagedDownload,
+  TakeoverState,
+  type PendingResponse,
+} from "./takeover.js";
 
 const HOST_NAME = "com.downlism.host";
 
@@ -58,20 +64,11 @@ void refreshSettings();
 chrome.storage.onChanged.addListener(() => void refreshSettings());
 
 /**
- * URLs the header watcher has handed to Downlism, waiting for the matching download entry to
- * appear so it can be cancelled at once. Decisions expire: one that never produced a download
- * would otherwise cancel an unrelated download much later.
+ * Header responses are only candidates. Fetch/XHR traffic can carry Content-Disposition too;
+ * handing it over before chrome.downloads confirms a real download is what caused API
+ * "response" files and MEGA's encrypted chunk requests to open a storm of prompts.
  */
-const decided = new Map<string, number>();
-const DECISION_LIFETIME = 30_000;
-
-function takeDecision(url: string): boolean {
-  const at = decided.get(url);
-  if (at === undefined) return false;
-
-  decided.delete(url);
-  return Date.now() - at < DECISION_LIFETIME;
-}
+const takeovers = new TakeoverState();
 
 function headerValue(headers: chrome.webRequest.HttpHeader[] | undefined, name: string): string {
   const found = headers?.find((header) => header.name.toLowerCase() === name);
@@ -82,6 +79,13 @@ function extensionOf(filename: string): string {
   const clean = filename.split(/[?#]/)[0];
   const dot = clean.lastIndexOf(".");
   return dot < 0 ? "" : clean.slice(dot + 1).toLowerCase();
+}
+
+function shouldSkip(fileName: string | undefined, mime: string | undefined): boolean {
+  const fileExtension = extensionOf(fileName ?? "");
+  const mimeExtension = extensionForMime(mime);
+  return cached.skipExtensions.includes(fileExtension)
+    || (mimeExtension !== undefined && cached.skipExtensions.includes(mimeExtension));
 }
 
 /** Pulls the filename out of a Content-Disposition value, RFC 5987 form first. */
@@ -152,6 +156,39 @@ async function notifyFailure(): Promise<void> {
 }
 
 /**
+ * The cancel call is made by the event listener before this function starts. We still wait for
+ * its result before handing anything over: if Chrome refused the cancellation, starting the
+ * same file in Downlism would create a duplicate.
+ */
+async function completeTakeover(
+  item: chrome.downloads.DownloadItem,
+  candidate: PendingResponse,
+  cancellation: Promise<void>,
+): Promise<void> {
+  try {
+    await cancellation;
+  } catch {
+    takeovers.release(item.id);
+    return;
+  }
+
+  if (await handOver(candidate)) {
+    await chrome.downloads.erase({ id: item.id });
+    return;
+  }
+
+  // Hand the download back rather than leaving the person with a cancelled entry and no file.
+  // The restarted one carries byExtensionId, so all takeover routes let it through.
+  await notifyFailure();
+  await chrome.downloads.erase({ id: item.id });
+  try {
+    await chrome.downloads.download({ url: candidate.url });
+  } catch {
+    // Nothing further to try; the badge already said so.
+  }
+}
+
+/**
  * Route 2: watch response headers and decide before the download exists.
  *
  * Not blocking — Chrome's MV3 removed that, so this only observes. What it buys is the
@@ -161,24 +198,26 @@ async function notifyFailure(): Promise<void> {
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     if (!cached.enabled || details.method !== "GET") return;
+    if (isPageManagedDownload(details.url, details.initiator)) return;
 
     const disposition = headerValue(details.responseHeaders, "content-disposition");
     if (!/attachment/i.test(disposition)) return;
 
     const fileName = nameFromDisposition(disposition);
-    if (fileName && cached.skipExtensions.includes(extensionOf(fileName))) return;
+    const contentType = headerValue(details.responseHeaders, "content-type");
+    if (shouldSkip(fileName, contentType)) return;
 
     const length = Number(headerValue(details.responseHeaders, "content-length")) || 0;
     if (length > 0 && length < cached.minimumBytes) return;
 
-    decided.set(details.url, Date.now());
-    void (async () => {
-      if (await handOver({ url: details.url, fileName, referrer: details.initiator, totalBytes: length })) return;
-
-      // Downlism refused it, so let the browser keep the download it already started.
-      decided.delete(details.url);
-      await notifyFailure();
-    })();
+    // Do not hand this response over yet. Content-Disposition is also used by API responses
+    // and cloud download chunks; only chrome.downloads can confirm that Chrome will save it.
+    takeovers.remember({
+      url: details.url,
+      fileName,
+      referrer: details.initiator,
+      totalBytes: length,
+    });
   },
   { urls: ["http://*/*", "https://*/*"], types: ["main_frame", "sub_frame", "xmlhttprequest", "other"] },
   ["responseHeaders"],
@@ -193,11 +232,23 @@ chrome.downloads.onCreated.addListener((item) => {
   if (item.byExtensionId) return;
   // A restored history entry is not a new download.
   if (item.endTime) return;
+  if (isPageManagedDownload(item.finalUrl, item.url, item.referrer)) return;
 
-  if (!takeDecision(item.finalUrl || item.url)) return;
+  const candidate = takeovers.claimResponse(item.id, [item.finalUrl, item.url]);
+  if (!candidate) return;
 
-  void chrome.downloads.cancel(item.id);
-  void chrome.downloads.erase({ id: item.id });
+  // Issue cancellation synchronously. The native handover waits until Chrome confirms it.
+  const cancellation = chrome.downloads.cancel(item.id);
+  void completeTakeover(item, candidate, cancellation);
+});
+
+// Claimed IDs live until Chrome removes or finishes the item, so onDeterminingFilename cannot
+// race the header route and hand the same file over a second time.
+chrome.downloads.onErased.addListener((downloadId) => takeovers.release(downloadId));
+chrome.downloads.onChanged.addListener((delta) => {
+  if (delta.state?.current === "complete" || delta.state?.current === "interrupted") {
+    takeovers.release(delta.id);
+  }
 });
 
 /**
@@ -209,30 +260,20 @@ chrome.downloads.onDeterminingFilename.addListener((item) => {
   if (item.byExtensionId || item.endTime) return;
   if (!cached.enabled) return;
   if (!/^https?:/i.test(item.finalUrl || item.url)) return;
+  if (isPageManagedDownload(item.finalUrl, item.url, item.referrer)) return;
   if (item.fileSize > 0 && item.fileSize < cached.minimumBytes) return;
-  if (cached.skipExtensions.includes(extensionOf(item.filename || ""))) return;
+  if (shouldSkip(item.filename, item.mime)) return;
+  if (!takeovers.claimFallback(item.id)) return;
 
-  void chrome.downloads.cancel(item.id);
+  const url = item.finalUrl || item.url;
+  const fileName = item.filename ? item.filename.split(/[\\/]/).pop() : undefined;
+  const cancellation = chrome.downloads.cancel(item.id);
 
-  void (async () => {
-    const url = item.finalUrl || item.url;
-    const fileName = item.filename ? item.filename.split(/[\\/]/).pop() : undefined;
-
-    if (await handOver({ url, fileName, referrer: item.referrer, totalBytes: item.fileSize })) {
-      await chrome.downloads.erase({ id: item.id });
-      return;
-    }
-
-    // Hand the download back rather than leaving the person with a cancelled entry and no
-    // file. The restarted one carries byExtensionId, so the guards above let it through.
-    await notifyFailure();
-    await chrome.downloads.erase({ id: item.id });
-    try {
-      await chrome.downloads.download({ url });
-    } catch {
-      // Nothing further to try; the badge already said so.
-    }
-  })();
+  void completeTakeover(
+    item,
+    { url, fileName, referrer: item.referrer, totalBytes: item.fileSize },
+    cancellation,
+  );
 });
 
 /**
