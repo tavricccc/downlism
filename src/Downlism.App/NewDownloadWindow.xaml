@@ -67,14 +67,18 @@
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             <ComboBox x:Name="MediaType" Grid.Row="3" Grid.Column="1" HorizontalAlignment="Stretch"
                       SelectionChanged="MediaTypeChanged" AutomationProperties.Name="下載內容">
-                <ComboBoxItem Content="影片" Tag="Video" />
-                <ComboBoxItem Content="音訊（MP3）" Tag="Audio" />
+                <ComboBoxItem x:Name="VideoOption" Content="影片" Tag="Video" />
+                <ComboBoxItem x:Name="AudioOption" Content="音訊（MP3）" Tag="Audio" />
             </ComboBox>
 
             <TextBlock x:Name="MediaQualityLabel" Grid.Row="4" Text="品質" VerticalAlignment="Center"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            <ComboBox x:Name="MediaQuality" Grid.Row="4" Grid.Column="1" HorizontalAlignment="Stretch"
-                      AutomationProperties.Name="下載品質" />
+            <StackPanel x:Name="MediaQualityPanel" Grid.Row="4" Grid.Column="1" Spacing="4">
+                <ComboBox x:Name="MediaQuality" HorizontalAlignment="Stretch"
+                          AutomationProperties.Name="下載品質" />
+                <TextBlock x:Name="MediaStatus" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
 
             <TextBlock Grid.Row="5" Text="存到" VerticalAlignment="Center"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -109,10 +113,10 @@
                           AutomationProperties.Name="以後由瀏覽器接手時直接開始" />
 
                 <Button Grid.Column="1" Content="取消" Click="CancelClick" AutomationProperties.Name="取消" />
-                <Button Grid.Column="2" Content="稍後下載" Click="LaterClick"
+                <Button x:Name="LaterButton" Grid.Column="2" Content="稍後下載" Click="LaterClick"
                         ToolTipService.ToolTip="加入清單但先不開始"
                         AutomationProperties.Name="稍後下載" />
-                <Button Grid.Column="3" Content="開始下載" Click="StartClick"
+                <Button x:Name="StartButton" Grid.Column="3" Content="開始下載" Click="StartClick"
                         Style="{ThemeResource AccentButtonStyle}" AutomationProperties.Name="開始下載" />
             </Grid>
         </Border>

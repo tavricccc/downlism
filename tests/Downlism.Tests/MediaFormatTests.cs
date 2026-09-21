@@ -15,11 +15,13 @@ public sealed class MediaFormatTests
     }
 
     [Fact]
-    public void VideoQualityCapsBothCombinedAndSeparateFormats()
+    public void VideoQualitySelectsTheNearestAvailableResolution()
     {
         var arguments = MediaFormat.ArgumentsFor(Request() with { MediaQuality = 1080 });
 
-        Assert.Contains("bestvideo[height<=1080]+bestaudio/best[height<=1080]/best", arguments);
+        Assert.Equal(
+            ["-f", "bestvideo+bestaudio/best", "--format-sort", "res~1080", "--merge-output-format", "mp4"],
+            arguments);
     }
 
     [Fact]
@@ -32,7 +34,7 @@ public sealed class MediaFormatTests
         });
 
         Assert.Equal(
-            ["-f", "bestaudio/best", "--extract-audio", "--audio-format", "mp3", "--audio-quality", "192K"],
+            ["-f", "bestaudio/best", "--format-sort", "abr~192", "--extract-audio", "--audio-format", "mp3", "--audio-quality", "192K"],
             arguments);
     }
 

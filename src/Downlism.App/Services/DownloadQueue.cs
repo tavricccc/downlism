@@ -40,6 +40,13 @@ public sealed class DownloadQueue : IDisposable
     /// </summary>
     public bool MediaToolsReady => _tools.IsReady;
 
+    /// <summary>Reads the qualities yt-dlp can actually download from a media page.</summary>
+    public Task<MediaFormats> ProbeMediaAsync(
+        DownloadRequest request,
+        Action<string>? status,
+        CancellationToken cancellationToken) =>
+        new MediaProbe(_tools).RunAsync(request, status, cancellationToken);
+
     /// <summary>
     /// The BitTorrent session throttles in one place for every torrent at once, unlike HTTP
     /// where each transfer carries its own ceiling.

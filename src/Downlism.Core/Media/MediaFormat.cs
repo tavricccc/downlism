@@ -10,23 +10,34 @@ public static class MediaFormat
     {
         if (request.MediaOutput == MediaOutput.Audio)
         {
-            return
+            var arguments = new List<string> { "-f", "bestaudio/best" };
+            if (request.MediaQuality is > 0)
+            {
+                // A page can change its formats between probing and starting. Sorting by the
+                // nearest bitrate still returns a valid stream when the exact one disappeared.
+                arguments.AddRange(["--format-sort", "abr~" + request.MediaQuality.Value.ToString(CultureInfo.InvariantCulture)]);
+            }
+
+            arguments.AddRange(
             [
-                "-f", "bestaudio/best",
                 "--extract-audio",
                 "--audio-format", "mp3",
                 "--audio-quality", request.MediaQuality is > 0
                     ? request.MediaQuality.Value.ToString(CultureInfo.InvariantCulture) + "K"
                     : "0",
-            ];
+            ]);
+            return arguments;
         }
 
-        var selector = request.MediaQuality is > 0
-            // The final fallback keeps direct MP4 sources working when they do not report a
-            // height. On sites with a format list, both preferred branches honour the cap.
-            ? $"bestvideo[height<={request.MediaQuality.Value}]+bestaudio/best[height<={request.MediaQuality.Value}]/best"
-            : "bestvideo+bestaudio/best";
+        var video = new List<string> { "-f", "bestvideo+bestaudio/best" };
+        if (request.MediaQuality is > 0)
+        {
+            // '~' asks yt-dlp for the numerically nearest available resolution, so a format
+            // disappearing after the probe does not turn a valid download into an error.
+            video.AddRange(["--format-sort", "res~" + request.MediaQuality.Value.ToString(CultureInfo.InvariantCulture)]);
+        }
 
-        return ["-f", selector, "--merge-output-format", "mp4"];
+        video.AddRange(["--merge-output-format", "mp4"]);
+        return video;
     }
 }

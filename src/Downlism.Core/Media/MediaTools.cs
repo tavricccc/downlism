@@ -52,16 +52,8 @@ public sealed class MediaTools(HttpClient client)
 
     public bool IsReady => File.Exists(YtDlpPath) && File.Exists(FfmpegPath);
 
-    /// <summary>
-    /// Makes sure both executables are present, reporting what it is doing so a first run does
-    /// not look like a download that has simply stopped.
-    /// </summary>
-    /// <param name="note">Called with the phase, in the words the row will show.</param>
-    /// <param name="progress">
-    /// Forwarded from the transfer that triggered provisioning, so the first video download
-    /// shows a moving bar for the two hundred megabytes it spends before it starts.
-    /// </param>
-    public async Task EnsureAsync(
+    /// <summary>Makes sure yt-dlp is present before probing a page or downloading it.</summary>
+    public async Task EnsureYtDlpAsync(
         Action<string>? note,
         IProgress<DownloadProgress>? progress,
         CancellationToken cancellationToken)
@@ -81,7 +73,32 @@ public sealed class MediaTools(HttpClient client)
                 note?.Invoke("正在更新 yt-dlp");
                 await TryRefreshAsync(progress, cancellationToken).ConfigureAwait(false);
             }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
 
+    /// <summary>
+    /// Makes sure both executables are present, reporting what it is doing so a first run does
+    /// not look like a download that has simply stopped.
+    /// </summary>
+    /// <param name="note">Called with the phase, in the words the row will show.</param>
+    /// <param name="progress">
+    /// Forwarded from the transfer that triggered provisioning, so the first video download
+    /// shows a moving bar for the two hundred megabytes it spends before it starts.
+    /// </param>
+    public async Task EnsureAsync(
+        Action<string>? note,
+        IProgress<DownloadProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        await EnsureYtDlpAsync(note, progress, cancellationToken).ConfigureAwait(false);
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
             if (!File.Exists(FfmpegPath))
             {
                 note?.Invoke("正在下載 ffmpeg（約 180 MB），只需要這一次");

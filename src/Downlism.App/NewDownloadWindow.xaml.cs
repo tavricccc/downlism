@@ -5,6 +5,7 @@ using Downlism.App.Services;
 using Downlism.App.ViewModels;
 using Downlism.Core.Downloads;
 using Downlism.Core.Http;
+using Downlism.Core.Media;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -56,7 +57,9 @@ public sealed partial class NewDownloadWindow : Window
     private readonly Func<DownloadRequest, bool, DownloadJob> _accepted;
     private readonly Action<bool>? _stopAsking;
     private readonly int _position;
+    private readonly CancellationTokenSource _mediaProbeCancellation = new();
     private bool _settled;
+    private MediaFormats? _mediaFormats;
     private DownloadJob? _job;
 
     public NewDownloadWindow(
@@ -88,10 +91,11 @@ public sealed partial class NewDownloadWindow : Window
         Fill();
         StopAsking.Visibility = stopAsking is null ? Visibility.Collapsed : Visibility.Visible;
 
-        Root.Loaded += (_, _) => FitToContent();
+        Root.Loaded += OnLoaded;
 
         Closed += (_, _) =>
         {
+            _mediaProbeCancellation.Cancel();
             App.Queue.Changed -= OnQueueChanged;
             if (_job is null)
             {
@@ -189,11 +193,18 @@ public sealed partial class NewDownloadWindow : Window
         MediaTypeLabel.Visibility = mediaVisibility;
         MediaType.Visibility = mediaVisibility;
         MediaQualityLabel.Visibility = mediaVisibility;
-        MediaQuality.Visibility = mediaVisibility;
+        MediaQualityPanel.Visibility = mediaVisibility;
         if (request.Kind == TransferKind.Media)
         {
             MediaType.SelectedIndex = request.MediaOutput == MediaOutput.Audio ? 1 : 0;
-            FillMediaQualities(request.MediaOutput, request.MediaQuality);
+            MediaType.IsEnabled = false;
+            MediaQuality.IsEnabled = false;
+            LaterButton.IsEnabled = false;
+            StartButton.IsEnabled = false;
+            MediaQuality.Items.Clear();
+            MediaQuality.Items.Add(new ComboBoxItem { Content = "正在讀取…" });
+            MediaQuality.SelectedIndex = 0;
+            MediaStatus.Text = "正在向來源查詢可下載的格式";
         }
 
         Folder.Text = request.Directory;
@@ -207,33 +218,105 @@ public sealed partial class NewDownloadWindow : Window
         _ => bytes > 0 ? DownloadRowViewModel.Bytes(bytes) : "開始下載後才會知道",
     };
 
+    private async void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        FitToContent();
+        if (_capture.Request.Kind != TransferKind.Media) return;
+
+        try
+        {
+            _mediaFormats = await App.Queue.ProbeMediaAsync(
+                _capture.Request,
+                status => DispatcherQueue.TryEnqueue(() => MediaStatus.Text = status),
+                _mediaProbeCancellation.Token);
+
+            VideoOption.IsEnabled = _mediaFormats.HasVideo || (!_mediaFormats.HasVideo && !_mediaFormats.HasAudio);
+            AudioOption.IsEnabled = _mediaFormats.HasAudio || (!_mediaFormats.HasVideo && !_mediaFormats.HasAudio);
+
+            if (!_mediaFormats.HasVideo && _mediaFormats.HasAudio) MediaType.SelectedIndex = 1;
+            else if (_mediaFormats.HasVideo && !_mediaFormats.HasAudio) MediaType.SelectedIndex = 0;
+
+            var output = SelectedMediaOutput();
+            FillMediaQualities(output, _capture.Request.MediaQuality);
+            MediaStatus.Text = DescribeFormats(_mediaFormats);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception)
+        {
+            // The download can still succeed: format sorting below asks yt-dlp for the nearest
+            // available stream rather than requiring one exact format ID.
+            _mediaFormats = null;
+            VideoOption.IsEnabled = true;
+            AudioOption.IsEnabled = true;
+            FillMediaQualities(SelectedMediaOutput(), _capture.Request.MediaQuality);
+            MediaStatus.Text = $"無法讀取品質：{exception.Message}。下載時會自動選最接近的格式。";
+        }
+
+        MediaType.IsEnabled = true;
+        MediaQuality.IsEnabled = true;
+        LaterButton.IsEnabled = true;
+        StartButton.IsEnabled = true;
+        FitToContent();
+    }
+
     private void MediaTypeChanged(object sender, SelectionChangedEventArgs e)
     {
         if (MediaType.SelectedItem is not ComboBoxItem { Tag: string tag }
             || !Enum.TryParse<MediaOutput>(tag, out var output)) return;
 
         KindLabel.Text = output == MediaOutput.Audio ? "音訊" : "影片";
-        FillMediaQualities(output, selected: null);
+        if (MediaType.IsEnabled) FillMediaQualities(output, selected: null);
     }
+
+    private MediaOutput SelectedMediaOutput() =>
+        MediaType.SelectedItem is ComboBoxItem { Tag: string tag }
+        && Enum.TryParse<MediaOutput>(tag, out var output)
+            ? output
+            : MediaOutput.Video;
 
     private void FillMediaQualities(MediaOutput output, int? selected)
     {
-        (string Label, int? Value)[] choices = output == MediaOutput.Audio
-            ? [("最佳品質", null), ("320 kbps", 320), ("256 kbps", 256), ("192 kbps", 192), ("128 kbps", 128)]
-            : [("最佳畫質", null), ("2160p", 2160), ("1440p", 1440), ("1080p", 1080), ("720p", 720), ("480p", 480), ("360p", 360)];
+        var values = output == MediaOutput.Audio
+            ? _mediaFormats?.AudioBitrates ?? [320, 256, 192, 128]
+            : _mediaFormats?.VideoHeights ?? [2160, 1440, 1080, 720, 480, 360];
+        var suffix = output == MediaOutput.Audio ? " kbps" : "p";
+        var best = output == MediaOutput.Audio ? "最佳品質" : "最佳畫質";
 
         MediaQuality.Items.Clear();
-        foreach (var choice in choices)
+        MediaQuality.Items.Add(new ComboBoxItem { Content = best, Tag = string.Empty });
+        foreach (var value in values)
         {
             MediaQuality.Items.Add(new ComboBoxItem
             {
-                Content = choice.Label,
-                Tag = choice.Value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+                Content = value.ToString(System.Globalization.CultureInfo.InvariantCulture) + suffix,
+                Tag = value.ToString(System.Globalization.CultureInfo.InvariantCulture),
             });
         }
 
-        MediaQuality.SelectedIndex = Array.FindIndex(choices, choice => choice.Value == selected);
-        if (MediaQuality.SelectedIndex < 0) MediaQuality.SelectedIndex = 0;
+        MediaQuality.SelectedIndex = 0;
+        if (selected is not > 0) return;
+
+        for (var index = 1; index < MediaQuality.Items.Count; index++)
+        {
+            if (MediaQuality.Items[index] is ComboBoxItem { Tag: string tag }
+                && int.TryParse(tag, out var value)
+                && value == selected)
+            {
+                MediaQuality.SelectedIndex = index;
+                break;
+            }
+        }
+    }
+
+    private static string DescribeFormats(MediaFormats formats)
+    {
+        var parts = new List<string>();
+        if (formats.VideoHeights.Count > 0) parts.Add($"{formats.VideoHeights.Count} 種影片畫質");
+        if (formats.AudioBitrates.Count > 0) parts.Add($"{formats.AudioBitrates.Count} 種音訊品質");
+        return parts.Count > 0 ? "已讀取「" + string.Join("、", parts) + "」" : "來源未提供品質明細；下載時會自動選擇。";
     }
 
     private DownloadRequest RequestFromPrompt()
