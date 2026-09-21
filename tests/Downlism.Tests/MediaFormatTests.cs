@@ -19,7 +19,7 @@ public sealed class MediaFormatTests
     {
         var arguments = MediaFormat.ArgumentsFor(Request() with { MediaQuality = 1080 });
 
-        Assert.Contains("bestvideo[height<=1080]+bestaudio/best[height<=1080]", arguments);
+        Assert.Contains("bestvideo[height<=1080]+bestaudio/best[height<=1080]/best", arguments);
     }
 
     [Fact]

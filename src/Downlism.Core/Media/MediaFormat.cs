@@ -22,7 +22,9 @@ public static class MediaFormat
         }
 
         var selector = request.MediaQuality is > 0
-            ? $"bestvideo[height<={request.MediaQuality.Value}]+bestaudio/best[height<={request.MediaQuality.Value}]"
+            // The final fallback keeps direct MP4 sources working when they do not report a
+            // height. On sites with a format list, both preferred branches honour the cap.
+            ? $"bestvideo[height<={request.MediaQuality.Value}]+bestaudio/best[height<={request.MediaQuality.Value}]/best"
             : "bestvideo+bestaudio/best";
 
         return ["-f", selector, "--merge-output-format", "mp4"];
