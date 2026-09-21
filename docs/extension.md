@@ -33,7 +33,9 @@ MV3 拿掉了可封鎖的 `webRequest`，所以擴充功能沒有辦法在回應
 
 Downlism 若沒接手，連結會被重新觸發一次交還給瀏覽器，使用者不會察覺中間發生過什麼。
 
-**標頭預判（service worker）。** `webRequest.onHeadersReceived` 在回應標頭抵達時就看得到 `Content-Disposition`、`Content-Length`、`Content-Type`，當場決定要不要接手並記下網址；等 `chrome.downloads.onCreated` 通報時，取消是零延遲送出的。這是 Neat Download Manager 的做法，比在 downloads 事件裡才開始判斷嚴格更好——到那時候標頭早就沒了。決定會在 30 秒後過期，否則一個沒有產生下載的判斷會在很久以後誤殺另一個下載。
+**標頭預判（service worker）。** `webRequest.onHeadersReceived` 在回應標頭抵達時就看得到 `Content-Disposition`、`Content-Length`、`Content-Type`，但這時只記錄候選項，不會遞交給 Downlism。`fetch`、XHR 與雲端硬碟的分塊請求也可能帶有 `Content-Disposition`；只有 `chrome.downloads.onCreated` 出現相同網址，證明瀏覽器真的要儲存檔案後，才會取消並接手。這既保留了標頭資訊，也不會把 API 的 `response` 或 MEGA 的加密分塊誤當成數百個下載。候選項會在 30 秒後過期，數量也有上限，避免長時間分塊傳輸撐大 service worker。
+
+同一個 Chrome 下載 ID 只能被認領一次。標頭路徑與 `onDeterminingFilename` 即使前後緊接著觸發，也只會有一條遞交；而且必須等 Chrome 確認取消成功才會送往 Downlism，取消失敗時不會額外製造一份重複下載。
 
 **最後手段（service worker）。** 沒有任何標頭宣告的下載——重新導向鏈、blob、伺服器不送 `Content-Disposition`——只剩 `onDeterminingFilename` 看得到。這條會在**任何 `await` 之前**就先取消，設定因此快取在記憶體裡讓判斷同步完成。它排在最後，因為它一定會浪費一小段檔案。
 
