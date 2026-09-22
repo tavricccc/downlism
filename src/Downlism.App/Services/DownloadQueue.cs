@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Downlism.Core.Downloads;
 using Downlism.Core.Http;
 using Downlism.Core.Media;
@@ -6,356 +5,253 @@ using Downlism.Core.Torrents;
 
 namespace Downlism.App.Services;
 
-/// <summary>
-/// Owns every running transfer and the limit on how many run at once.
-/// </summary>
-/// <remarks>
-/// The queue exists because unlimited parallelism is slower, not faster: twenty transfers of
-/// eight connections each is a hundred and sixty sockets competing for one uplink, and every
-/// one of them finishes late. Holding the rest back means the first few finish early.
-/// </remarks>
 public sealed class DownloadQueue : IDisposable
 {
+    private readonly object _sync = new();
     private readonly HttpClient _client = DownloadHttpClientFactory.Create(64);
-    private readonly ConcurrentDictionary<Guid, Entry> _entries = new();
-
-    // Both of these hold state that must not be per-transfer: the tools are two executables on
-    // disk that several jobs would otherwise race to install, and the BitTorrent session is one
-    // listening port and one DHT table shared by every torrent.
+    private readonly Dictionary<Guid, Entry> _entries = [];
     private readonly MediaTools _tools;
     private readonly TorrentEngine _torrents;
+    private readonly ConcurrencyGate _slots;
+    private readonly Func<DownloadRequest, ITransferEngine>? _engineFactory;
+    private bool _disposed;
 
-    private SemaphoreSlim _slots;
-
-    public DownloadQueue(int concurrentDownloads = 3)
+    public DownloadQueue(int concurrentDownloads = 3, Func<DownloadRequest, ITransferEngine>? engineFactory = null)
     {
-        _slots = new SemaphoreSlim(concurrentDownloads, concurrentDownloads);
-        _tools = new MediaTools(_client);
-        _torrents = new TorrentEngine(_client);
+        _slots = new(concurrentDownloads);
+        _tools = new(_client);
+        _torrents = new(_client);
+        _engineFactory = engineFactory;
     }
 
-    /// <summary>
-    /// Whether the media tools have already been fetched. The window uses it to warn once,
-    /// before the first video download spends several minutes looking like it has stalled.
-    /// </summary>
     public bool MediaToolsReady => _tools.IsReady;
-
-    /// <summary>Reads the qualities yt-dlp can actually download from a media page.</summary>
-    public Task<MediaFormats> ProbeMediaAsync(
-        DownloadRequest request,
-        Action<string>? status,
-        CancellationToken cancellationToken) =>
-        new MediaProbe(_tools).RunAsync(request, status, cancellationToken);
-
-    /// <summary>
-    /// The BitTorrent session throttles in one place for every torrent at once, unlike HTTP
-    /// where each transfer carries its own ceiling.
-    /// </summary>
-    public Task SetTorrentRateLimitAsync(long bytesPerSecond) => _torrents.SetRateLimitAsync(bytesPerSecond);
-
-    /// <summary>
-    /// Picks the engine for a request. This is the only place that knows there is more than
-    /// one; everything else in the queue treats every transfer identically.
-    /// </summary>
-    private ITransferEngine EngineFor(DownloadRequest request) => request.Kind switch
+    public Task<MediaFormats> ProbeMediaAsync(DownloadRequest request, Action<string>? status, CancellationToken token) =>
+        new MediaProbe(_tools).RunAsync(request, status, token);
+    public Task SetTorrentRateLimitAsync(long rate) => _torrents.SetRateLimitAsync(rate);
+    private ITransferEngine EngineFor(DownloadRequest request) => _engineFactory?.Invoke(request) ?? (request.Kind switch
     {
         TransferKind.Media => new MediaEngine(_tools),
         TransferKind.Torrent => _torrents,
         _ => new DownloadEngine(_client),
-    };
-
-    /// <summary>How a transfer that fails for a transient reason is retried.</summary>
+    });
     public RetryPolicy Retry { get; set; } = RetryPolicy.Default;
-
-    /// <summary>Raised on a background thread whenever a transfer changes state.</summary>
     public event Action<DownloadJob>? Changed;
-
-    public IEnumerable<DownloadJob> Jobs => _entries.Values.Select(entry => entry.Job);
+    public IEnumerable<DownloadJob> Jobs { get { lock (_sync) return _entries.Values.Select(entry => entry.Job).ToArray(); } }
 
     public DownloadJob Add(DownloadRequest request)
     {
-        var job = new DownloadJob(Guid.NewGuid(), request);
-        var entry = new Entry(job, new CancellationTokenSource());
-        _entries[job.Id] = entry;
-
-        _ = RunAsync(entry);
-        return job;
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var entry = new Entry(new DownloadJob(Guid.NewGuid(), request));
+            _entries.Add(entry.Job.Id, entry);
+            Start(entry);
+            return entry.Job;
+        }
     }
 
-    /// <summary>
-    /// Re-enters a transfer from a previous session without starting it. The partial file and
-    /// its sidecar are still on disk, so Resume picks up where the last run stopped.
-    /// </summary>
     public DownloadJob Restore(Guid id, DownloadRequest request, DownloadState state, string? path)
     {
-        var job = new DownloadJob(id, request)
+        lock (_sync)
         {
-            State = state,
-            Path = path,
-            Paused = state == DownloadState.Paused,
-            Progress = ReadStoredProgress(request),
-        };
-
-        _entries[id] = new Entry(job, new CancellationTokenSource());
-        return job;
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var job = new DownloadJob(id, request) { State = state, Path = path,
+                Paused = state == DownloadState.Paused, Progress = ReadStoredProgress(request) };
+            _entries.Add(id, new Entry(job));
+            return job;
+        }
     }
 
-    /// <summary>
-    /// Recovers what the sidecar knows, so a restored row shows where each connection stopped
-    /// instead of an empty bar that implies the previous session achieved nothing.
-    /// </summary>
     private static DownloadProgress? ReadStoredProgress(DownloadRequest request)
     {
-        if (request.FileName is null) return null;
-
-        // Sanitised for the same reason the engine sanitises it: this name reaches us from a
-        // web page by way of the extension, and an unsanitised one turns Path.Combine into an
-        // exception at best and a path outside the download folder at worst.
-        var fileName = SuggestedFileName.Sanitize(request.FileName);
-        var directory = DownloadCategory.DirectoryFor(request.Directory, fileName, request.SortIntoCategories);
-        var partial = Path.Combine(directory, fileName) + DownloadTarget.PartialExtension;
-
+        if (request.FileName is null || request.Kind != TransferKind.Http) return null;
         try
         {
+            var name = SuggestedFileName.Sanitize(request.FileName);
+            var folder = DownloadCategory.DirectoryFor(request.Directory, name, request.SortIntoCategories, request.CategoryRules);
+            var partial = System.IO.Path.Combine(folder, name) + DownloadTarget.PartialExtension;
+            if (!File.Exists(partial)) return null;
             using var state = SegmentStateFile.TryOpen(SegmentStateFile.PathFor(partial));
-            if (state is null) return null;
-
-            return new DownloadProgress(state.CompletedBytes(), state.TotalLength, 0, state.Segments.ToArray());
+            if (state is null || new FileInfo(partial).Length != state.TotalLength) return null;
+            return new(state.CompletedBytes(), state.TotalLength, 0, state.Segments.ToArray());
         }
-        catch (Exception exception) when (exception is IOException or ArgumentException or NotSupportedException)
-        {
-            return null;
-        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { return null; }
     }
 
-    /// <summary>
-    /// Stops a transfer, keeping its partial file and sidecar so it can be resumed. Pausing is
-    /// the same operation as failing here; the difference is only what the user is told.
-    /// </summary>
     public void Pause(Guid id)
     {
-        if (!_entries.TryGetValue(id, out var entry)) return;
-
-        entry.Job.Paused = true;
-        entry.Cancellation.Cancel();
+        lock (_sync)
+        {
+            if (!_entries.TryGetValue(id, out var entry) || !entry.Active) return;
+            entry.Job.Paused = true;
+            entry.Cancellation!.Cancel();
+        }
     }
 
     public void Resume(Guid id)
     {
-        if (!_entries.TryGetValue(id, out var entry)) return;
-        if (entry.Job.State is DownloadState.Running or DownloadState.Completed) return;
-
-        var replacement = new Entry(entry.Job, new CancellationTokenSource());
-        entry.Job.Paused = false;
-        _entries[id] = replacement;
-
-        _ = RunAsync(replacement);
+        lock (_sync)
+        {
+            if (_disposed || !_entries.TryGetValue(id, out var entry) || entry.Active ||
+                entry.Job.State is not (DownloadState.Paused or DownloadState.Failed)) return;
+            Start(entry);
+        }
     }
 
-    /// <summary>Cancels a transfer and removes it from the list, leaving the partial file.</summary>
+    private void Start(Entry entry)
+    {
+        entry.Active = true;
+        entry.Job.Paused = false;
+        entry.Job.Error = null;
+        entry.Job.State = DownloadState.Queued;
+        entry.Cancellation = new();
+        entry.Work = Task.Run(() => RunAsync(entry));
+    }
+
     public void Remove(Guid id)
     {
-        if (!_entries.TryRemove(id, out var entry)) return;
-
-        entry.Cancellation.Cancel();
-        entry.Job.State = DownloadState.Removed;
-        Changed?.Invoke(entry.Job);
+        lock (_sync)
+        {
+            if (!_entries.Remove(id, out var entry)) return;
+            entry.Job.State = DownloadState.Removed;
+            entry.Cancellation?.Cancel();
+            Changed?.Invoke(entry.Job);
+        }
     }
 
     public void PauseAll()
     {
-        foreach (var entry in _entries.Values.Where(entry => entry.Job.State == DownloadState.Running))
+        foreach (var job in Jobs.Where(job => job.State is DownloadState.Running or DownloadState.Queued or DownloadState.Retrying)) Pause(job.Id);
+    }
+    public void ResumeAll()
+    {
+        foreach (var job in Jobs.Where(job => job.State is DownloadState.Paused or DownloadState.Failed)) Resume(job.Id);
+    }
+    public void SetConcurrency(int value) => _slots.SetLimit(value);
+
+    private void Publish(Entry entry, Action<DownloadJob>? update = null)
+    {
+        lock (_sync)
         {
-            Pause(entry.Job.Id);
+            if (_disposed || entry.Job.State == DownloadState.Removed) return;
+            update?.Invoke(entry.Job);
+            Changed?.Invoke(entry.Job);
         }
     }
-
-    /// <summary>
-    /// Changes how many transfers may run at once.
-    /// </summary>
-    /// <remarks>
-    /// The new ceiling applies to transfers that have not started yet. Stopping one already in
-    /// flight to honour it would throw away its progress, and the person who lowered the limit
-    /// wanted less contention, not less finished work.
-    ///
-    /// The replaced semaphore is deliberately not disposed. Transfers already holding one of
-    /// its slots release it when they end, and a transfer still queued is waiting on it; either
-    /// one touching a disposed semaphore throws from a path that has no business failing. It is
-    /// an ordinary object and is collected once the last of them has let go.
-    /// </remarks>
-    public void SetConcurrency(int concurrentDownloads) =>
-        Interlocked.Exchange(ref _slots, new SemaphoreSlim(concurrentDownloads, concurrentDownloads));
 
     private async Task RunAsync(Entry entry)
     {
         var job = entry.Job;
-        var token = entry.Cancellation.Token;
-
-        // Captured, not read again later: the limit can be changed while this transfer runs,
-        // and releasing a slot back into a semaphore that never issued it throws.
-        var slots = _slots;
-
+        var cancellation = entry.Cancellation!;
+        var token = cancellation.Token;
+        var finalState = DownloadState.Failed;
+        IDisposable? slot = null;
         try
         {
-            job.State = DownloadState.Queued;
-            Changed?.Invoke(job);
-
-            await slots.WaitAsync(token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            Settle(job, paused: job.Paused);
-            return;
-        }
-
-        try
-        {
-            var progress = new Progress<DownloadProgress>(sample =>
+            Publish(entry);
+            slot = await _slots.EnterAsync(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            var progress = new DirectProgress(sample => Publish(entry, job =>
             {
                 job.Progress = sample;
-                Changed?.Invoke(job);
-            });
-
+                if (sample.ResolvedFileName is { } name && sample.ResolvedDirectory is { } folder)
+                {
+                    job.FileName = name;
+                    job.Request = job.Request with { FileName = name, Directory = folder, SortIntoCategories = false };
+                }
+            }));
             for (var attempt = 1; ; attempt++)
             {
+                token.ThrowIfCancellationRequested();
+                Publish(entry, job => { job.State = DownloadState.Running; job.Attempt = attempt; job.Error = null; });
                 try
                 {
-                    job.State = DownloadState.Running;
-                    job.Attempt = attempt;
-                    job.Error = null;
-                    Changed?.Invoke(job);
-
-                    var result = await EngineFor(job.Request)
-                        .RunAsync(job.Request, progress, token)
-                        .ConfigureAwait(false);
-
-                    job.Path = result.Path;
-                    // The engines that choose their own name only reveal it at the end.
-                    if (job.Request.Kind != TransferKind.Http)
+                    var result = await EngineFor(job.Request).RunAsync(job.Request, progress, token).ConfigureAwait(false);
+                    Publish(entry, job =>
                     {
-                        job.FileName = Path.GetFileName(result.Path.TrimEnd(Path.DirectorySeparatorChar));
-                    }
-
-                    job.State = DownloadState.Completed;
-                    Changed?.Invoke(job);
-                    return;
+                        job.Path = result.Path;
+                        job.FileName = System.IO.Path.GetFileName(result.Path.TrimEnd(System.IO.Path.DirectorySeparatorChar));
+                        job.Request = job.Request with { FileName = job.FileName, Directory = System.IO.Path.GetDirectoryName(result.Path) ?? job.Request.Directory, SortIntoCategories = false };
+                    });
+                    finalState = DownloadState.Completed;
+                    break;
                 }
-                catch (Exception exception) when (Retry.ShouldRetry(exception, attempt) && !token.IsCancellationRequested)
+                catch (Exception ex) when (!token.IsCancellationRequested && Retry.ShouldRetry(ex, attempt))
                 {
-                    // The partial file and its sidecar are still on disk, so the next attempt
-                    // resumes rather than starting the transfer again.
-                    job.Error = Describe(exception);
-                    job.State = DownloadState.Retrying;
-                    Changed?.Invoke(job);
-
+                    Publish(entry, job => { job.State = DownloadState.Retrying; job.Error = Describe(ex); });
                     await Task.Delay(Retry.DelayBefore(attempt), token).ConfigureAwait(false);
                 }
             }
         }
-        catch (OperationCanceledException)
-        {
-            Settle(job, paused: job.Paused);
-        }
-        catch (Exception exception)
-        {
-            job.Error = Describe(exception);
-            Settle(job, paused: false);
-        }
+        catch (Exception) when (token.IsCancellationRequested) { finalState = DownloadState.Paused; }
+        catch (Exception ex) { Publish(entry, job => job.Error = Describe(ex)); }
         finally
         {
-            try
+            slot?.Dispose();
+            lock (_sync)
             {
-                slots.Release();
+                entry.Active = false;
+                entry.Cancellation = null;
+                cancellation.Dispose();
+                if (!_disposed && job.State != DownloadState.Removed)
+                {
+                    job.State = finalState;
+                    job.Paused = finalState == DownloadState.Paused;
+                    Changed?.Invoke(job);
+                }
             }
-            catch (ObjectDisposedException)
-            {
-                // The queue was torn down while this transfer was running.
-            }
-
-            entry.Cancellation.Dispose();
         }
     }
 
-    private void Settle(DownloadJob job, bool paused)
+    private static string Describe(Exception ex) => ex switch
     {
-        job.State = paused ? DownloadState.Paused : DownloadState.Failed;
-        Changed?.Invoke(job);
-    }
-
-    /// <summary>Turns an exception into something a person can act on.</summary>
-    private static string Describe(Exception exception) => exception switch
-    {
-        // These two already speak for themselves: yt-dlp and MonoTorrent report failures the
-        // person can act on, and restating them as "下載失敗" would throw that away.
-        MediaDownloadException media => media.Message,
-        TorrentException torrent => torrent.Message,
-        TimeoutException => "伺服器沒有回應，已停止。可以繼續下載。",
+        MediaDownloadException or TorrentException or InvalidDataException => ex.Message,
+        TimeoutException => "伺服器沒有回應。請檢查連線後繼續下載，或調整逾時秒數。",
         HttpRequestException { StatusCode: System.Net.HttpStatusCode.NotFound } => "檔案已不存在（404）。",
-        HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden } => "伺服器拒絕存取（403）。可能需要重新登入來源網站。",
-        HttpRequestException http => http.StatusCode is null
-            ? "無法連線到伺服器。"
-            : $"伺服器回應 {(int)http.StatusCode}。",
-        IOException => "寫入檔案失敗，請確認磁碟空間與資料夾權限。",
+        HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.Unauthorized } => "伺服器拒絕存取。請重新登入來源網站後取得新的下載連結。",
+        HttpRequestException http => http.StatusCode is null ? "連線中斷或回應不完整，可以繼續下載。" : $"伺服器回應 {(int)http.StatusCode}。",
+        IOException => "檔案未完成。請確認磁碟空間、資料夾權限，以及是否有另一個下載使用同名檔案。",
         UnauthorizedAccessException => "沒有權限寫入下載資料夾。",
-        _ => exception.Message,
+        _ => ex.Message,
     };
 
     public void Dispose()
     {
-        foreach (var entry in _entries.Values)
+        Task[] work;
+        lock (_sync)
         {
-            entry.Cancellation.Cancel();
-            entry.Cancellation.Dispose();
+            if (_disposed) return;
+            _disposed = true;
+            foreach (var entry in _entries.Values) entry.Cancellation?.Cancel();
+            work = _entries.Values.Select(entry => entry.Work).OfType<Task>().ToArray();
+            _entries.Clear();
         }
-
-        _entries.Clear();
-        _slots.Dispose();
-
-        // Waited on, briefly. A torrent session that is not stopped leaves sockets open and its
-        // fast resume unwritten, which costs a full rehash on the next run; waiting forever on
-        // tracker goodbyes during application exit costs more than that is worth.
-        _torrents.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(4));
+        try { Task.WhenAll(work).Wait(TimeSpan.FromSeconds(4)); } catch (AggregateException) { }
+        try { _torrents.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(4)); } catch (AggregateException) { }
         _client.Dispose();
     }
-
-    private sealed record Entry(DownloadJob Job, CancellationTokenSource Cancellation);
+    private sealed class Entry(DownloadJob job)
+    {
+        public DownloadJob Job { get; } = job;
+        public CancellationTokenSource? Cancellation;
+        public Task? Work;
+        public bool Active;
+    }
+    private sealed class DirectProgress(Action<DownloadProgress> report) : IProgress<DownloadProgress>
+    { public void Report(DownloadProgress value) => report(value); }
 }
 
-public enum DownloadState
-{
-    Queued,
-    Running,
-    Retrying,
-    Paused,
-    Completed,
-    Failed,
-    Removed,
-}
+public enum DownloadState { Queued, Running, Retrying, Paused, Completed, Failed, Removed }
 
-/// <summary>One transfer, as the app tracks it.</summary>
 public sealed class DownloadJob(Guid id, DownloadRequest request)
 {
     public Guid Id { get; } = id;
-
-    public DownloadRequest Request { get; } = request;
-
-    /// <summary>
-    /// Not fixed at creation. A video is named by yt-dlp and a torrent by its own metadata, so
-    /// the label a row starts with is a placeholder that the finished transfer replaces.
-    /// </summary>
+    public DownloadRequest Request { get; set; } = request;
     public string FileName { get; set; } = request.FileName ?? SuggestedFileName.FromUri(request.Uri);
-
     public volatile DownloadState State = DownloadState.Queued;
-
     public DownloadProgress? Progress { get; set; }
-
     public string? Path { get; set; }
-
     public string? Error { get; set; }
-
-    /// <summary>Distinguishes a cancellation the user asked for from one caused by a failure.</summary>
     public bool Paused { get; set; }
-
-    /// <summary>Which attempt is running, counting from one.</summary>
     public int Attempt { get; set; } = 1;
 }
