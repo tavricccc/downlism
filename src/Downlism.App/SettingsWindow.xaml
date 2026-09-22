@@ -1,0 +1,85 @@
+<Window x:Class="Downlism.App.SettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Downlism 設定">
+    <Grid x:Name="Root" Padding="24,16,24,20" RowSpacing="16">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <TextBlock Text="設定" Style="{ThemeResource TitleTextBlockStyle}"/>
+        <Pivot Grid.Row="1" x:Name="Sections">
+            <PivotItem Header="下載">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="20" Padding="0,12,12,16">
+                        <StackPanel Spacing="8">
+                            <TextBlock Text="預設下載資料夾"/>
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <TextBox x:Name="Folder" PlaceholderText="留空使用 Downloads" AutomationProperties.Name="預設下載資料夾"/>
+                                <Button Grid.Column="1" Content="瀏覽…" Click="BrowseClick"/>
+                            </Grid>
+                        </StackPanel>
+                        <Grid ColumnSpacing="20" RowSpacing="20">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <NumberBox x:Name="Connections" Header="每個下載的連線數（1–32）" Minimum="1" Maximum="32" SpinButtonPlacementMode="Compact"/>
+                            <NumberBox x:Name="Concurrent" Grid.Column="1" Header="同時下載數（1–16）" Minimum="1" Maximum="16" SpinButtonPlacementMode="Compact"/>
+                            <NumberBox x:Name="Rate" Grid.Row="1" Header="每個 HTTP／影片下載上限（KiB/s）" Minimum="0" Maximum="10485760" SpinButtonPlacementMode="Compact"/>
+                            <NumberBox x:Name="TimeoutSeconds" Grid.Row="1" Grid.Column="1" Header="HTTP 讀取／回應逾時（5–600 秒）" Minimum="5" Maximum="600" SpinButtonPlacementMode="Compact"/>
+                            <NumberBox x:Name="Attempts" Grid.Row="2" Header="最多嘗試次數（1–10）" Minimum="1" Maximum="10" SpinButtonPlacementMode="Compact"/>
+                            <NumberBox x:Name="RetryDelay" Grid.Row="2" Grid.Column="1" Header="重試起始間隔（1–120 秒）" Minimum="1" Maximum="120" SpinButtonPlacementMode="Compact"/>
+                        </Grid>
+                        <TextBlock Text="速度填 0 表示不限速。HTTP／影片的連線與速度設定套用於新下載；BitTorrent 的速度上限由全部種子共用。同時下載數立即生效，降低時不會中斷已開始的傳輸。" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <CheckBox x:Name="Categories" Content="依類型分類存放"/>
+                        <CheckBox x:Name="Duplicates" Content="避免重複加入尚未完成的相同網址"/>
+                        <CheckBox x:Name="ResumeStartup" Content="啟動時繼續上次未完成的下載"/>
+                        <TextBlock Text="預設不自動續傳。啟用後可能立即使用網路；需要登入的下載仍可能要求重新從瀏覽器接手。" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </PivotItem>
+            <PivotItem Header="介面與行為">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="16" Padding="0,12,12,16">
+                        <ComboBox x:Name="ThemeChoice" Header="佈景主題" HorizontalAlignment="Stretch">
+                            <ComboBoxItem Content="跟隨 Windows" Tag="System"/>
+                            <ComboBoxItem Content="淺色" Tag="Light"/>
+                            <ComboBoxItem Content="深色" Tag="Dark"/>
+                        </ComboBox>
+                        <CheckBox x:Name="Startup" Content="開機時在背景啟動"/>
+                        <CheckBox x:Name="Tray" Content="關閉主視窗時縮到系統匣，繼續下載"/>
+                        <CheckBox x:Name="ClipboardWatch" Content="剪貼簿有網址時，在主視窗提示"/>
+                        <CheckBox x:Name="CapturePrompt" Content="由瀏覽器接手時先詢問"/>
+                        <CheckBox x:Name="ProgressWindow" Content="開始下載後保留獨立進度視窗"/>
+                        <CheckBox x:Name="AlwaysOnTop" Content="新增下載視窗保持最上層"/>
+                        <CheckBox x:Name="CompletedNotice" Content="下載完成時顯示系統匣通知"/>
+                        <CheckBox x:Name="FailedNotice" Content="下載失敗時顯示系統匣通知"/>
+                        <TextBlock Text="若關閉縮到系統匣，關閉主視窗會結束程式並保留未完成檔案。瀏覽器接手規則請在擴充功能中設定。" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </PivotItem>
+            <PivotItem Header="分類規則">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Spacing="16" Padding="0,12,12,16">
+                        <TextBlock Text="指定哪些副檔名放進哪個子資料夾。每行一個分類，自訂規則優先；沒指定的沿用內建分類。" TextWrapping="Wrap"/>
+                        <TextBox x:Name="Rules" Header="資料夾=副檔名,副檔名" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="220" MaxLength="16384" PlaceholderText="安裝包=exe,msi,msix&#10;設計素材=psd,blend,ai&#10;電子書=epub,mobi" AutomationProperties.Name="自訂分類規則"/>
+                        <TextBlock Text="資料夾只能是下載目錄下的一層名稱，不可填完整路徑或 ..。同一副檔名只能指定一次。清空此欄即可恢復內建分類。" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <TextBlock Text="內建：影片、音樂、文件、壓縮檔、程式、圖片。未知類型留在下載根目錄；BitTorrent 保留種子自己的目錄結構。" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                    </StackPanel>
+                </ScrollViewer>
+            </PivotItem>
+            <PivotItem Header="備份">
+                <StackPanel Spacing="16" Padding="0,12,12,16">
+                    <TextBlock Text="匯出偏好設定，或從另一台電腦匯入。備份不包含下載紀錄、Cookie 或開機自啟登錄。" TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="匯出設定…" Click="ExportClick"/>
+                        <Button Content="匯入設定…" Click="ImportClick"/>
+                    </StackPanel>
+                    <Button Content="還原預設值" Click="DefaultsClick"/>
+                    <TextBlock Text="匯入與還原只會更新這個視窗，按「儲存」才會套用。取消可保留原設定。" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                </StackPanel>
+            </PivotItem>
+        </Pivot>
+        <InfoBar x:Name="Notice" Grid.Row="2" IsOpen="False" IsClosable="True"/>
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <Button Content="取消" Click="CancelClick"/>
+            <Button Content="儲存" Style="{ThemeResource AccentButtonStyle}" Click="SaveClick"/>
+        </StackPanel>
+    </Grid>
+</Window>

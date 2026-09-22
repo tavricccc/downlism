@@ -74,6 +74,7 @@ public sealed partial class NewDownloadWindow : Window
         _stopAsking = stopAsking;
         _position = Interlocked.Increment(ref _open);
 
+        App.ApplyTheme(Root, App.ThemePreference);
         SystemBackdrop = new Microsoft.UI.Xaml.Media.MicaBackdrop();
         AppWindow.SetIcon("Assets/Downlism.ico");
 
@@ -85,7 +86,7 @@ public sealed partial class NewDownloadWindow : Window
             presenter.IsMaximizable = false;
             presenter.IsMinimizable = false;
             // Topmost before user interaction so it floats above browser window
-            presenter.IsAlwaysOnTop = true;
+            presenter.IsAlwaysOnTop = App.CurrentSettings.PromptAlwaysOnTop;
         }
 
         Fill();
@@ -209,6 +210,12 @@ public sealed partial class NewDownloadWindow : Window
 
         Folder.Text = request.Directory;
         SortIntoCategories.IsChecked = request.SortIntoCategories;
+        JobConnections.Value = request.Connections;
+        JobSpeed.Value = (double)request.BytesPerSecond / 1024;
+        JobConnections.IsEnabled = request.Kind != TransferKind.Torrent;
+        JobSpeed.IsEnabled = request.Kind != TransferKind.Torrent;
+        ExpectedHash.IsEnabled = request.Kind == TransferKind.Http;
+        ExpectedHash.Text = request.ExpectedSha256 ?? "";
     }
 
     private static string Describe(TransferKind kind, long bytes) => kind switch
@@ -337,9 +344,18 @@ public sealed partial class NewDownloadWindow : Window
                     : null;
         }
 
+        if (!double.IsFinite(JobConnections.Value) || JobConnections.Value != Math.Truncate(JobConnections.Value) ||
+            !double.IsFinite(JobSpeed.Value)) throw new ArgumentException("請輸入有效的連線數與限速。");
+        var hash = ExpectedHash.Text.Trim();
+        if (request.Kind == TransferKind.Http && hash.Length > 0 && (hash.Length != 64 || !hash.All(Uri.IsHexDigit)))
+            throw new ArgumentException("SHA-256 必須是 64 位十六進位字元。");
         return request with
         {
-            FileName = request.Kind == TransferKind.Http && name.Length > 0 ? name : null,
+            FileName = request.Kind == TransferKind.Http && name.Length > 0 &&
+                (request.FileName is not null || name != SuggestedFileName.FromUri(request.Uri)) ? name : null,
+            Connections = Math.Clamp((int)JobConnections.Value, 1, 32),
+            BytesPerSecond = Math.Clamp((long)Math.Round(JobSpeed.Value * 1024), 0, 10L * 1024 * 1024 * 1024),
+            ExpectedSha256 = request.Kind == TransferKind.Http && hash.Length > 0 ? hash : null,
             Directory = Folder.Text,
             SortIntoCategories = SortIntoCategories.IsChecked == true,
             MediaOutput = output,
@@ -349,18 +365,23 @@ public sealed partial class NewDownloadWindow : Window
 
     private async void BrowseClick(object sender, RoutedEventArgs e)
     {
-        var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.Downloads };
-        picker.FileTypeFilter.Add("*");
-
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-
-        var folder = await picker.PickSingleFolderAsync();
-        if (folder is not null) Folder.Text = folder.Path;
+        try
+        {
+            var picker = new FolderPicker { SuggestedStartLocation = PickerLocationId.Downloads };
+            picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var folder = await picker.PickSingleFolderAsync();
+            if (folder is not null) Folder.Text = folder.Path;
+        }
+        catch (Exception ex) { ShowPromptError("無法開啟資料夾選擇器：" + ex.Message); }
     }
 
     private void StartClick(object sender, RoutedEventArgs e)
     {
         if (_settled) return;
+        DownloadRequest request;
+        try { request = RequestFromPrompt(); }
+        catch (Exception ex) { ShowPromptError(ex.Message); return; }
         _settled = true;
 
         Interlocked.Decrement(ref _open);
@@ -374,7 +395,8 @@ public sealed partial class NewDownloadWindow : Window
             presenter.IsMinimizable = true;
         }
 
-        _job = _accepted(RequestFromPrompt(), true);
+        _job = _accepted(request, true);
+        if (!App.CurrentSettings.KeepProgressWindow) { Close(); return; }
 
         // Switch to progress view (like IDM)
         PromptContainer.Visibility = Visibility.Collapsed;
@@ -401,7 +423,9 @@ public sealed partial class NewDownloadWindow : Window
     private void UpdateProgress(DownloadJob job)
     {
         _job = job;
+        if (job.State == DownloadState.Removed) { Close(); return; }
         ProgressFileName.Text = job.FileName;
+        ProgressFolder.Text = $"存到：{job.Request.Directory}";
 
         var progress = job.Progress;
         ProgressRibbon.Segments = progress?.Segments is { Count: > 0 } segs ? segs : null;
@@ -474,7 +498,7 @@ public sealed partial class NewDownloadWindow : Window
     private void PauseResumeClick(object sender, RoutedEventArgs e)
     {
         if (_job is null) return;
-        if (_job.State == DownloadState.Running)
+        if (_job.State is DownloadState.Running or DownloadState.Queued or DownloadState.Retrying)
         {
             App.Queue.Pause(_job.Id);
         }
@@ -531,17 +555,28 @@ public sealed partial class NewDownloadWindow : Window
     private void LaterClick(object sender, RoutedEventArgs e)
     {
         if (_settled) return;
+        DownloadRequest request;
+        try { request = RequestFromPrompt(); }
+        catch (Exception ex) { ShowPromptError(ex.Message); return; }
         _settled = true;
         Interlocked.Decrement(ref _open);
 
         _stopAsking?.Invoke(StopAsking.IsChecked == true);
 
-        _accepted(RequestFromPrompt(), false);
+        _accepted(request, false);
 
         Close();
     }
 
     private void CancelClick(object sender, RoutedEventArgs e) => Close();
+    private void AdvancedExpanding(Expander sender, ExpanderExpandingEventArgs args) => DispatcherQueue.TryEnqueue(FitToContent);
+    private void AdvancedCollapsed(Expander sender, ExpanderCollapsedEventArgs args) => FitToContent();
+    private void ShowPromptError(string message)
+    {
+        PromptError.Text = message;
+        PromptError.Visibility = Visibility.Visible;
+        FitToContent();
+    }
 
     private void Settle(bool? start)
     {

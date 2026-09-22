@@ -24,6 +24,8 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="52" />
@@ -94,6 +96,18 @@
 
             <CheckBox x:Name="SortIntoCategories" Grid.Row="6" Grid.Column="1" Content="依類型分類存放"
                       AutomationProperties.Name="依類型分類存放" />
+            <Expander x:Name="Advanced" Grid.Row="7" Grid.ColumnSpan="2" Header="這次下載的設定" HorizontalAlignment="Stretch"
+                      Expanding="AdvancedExpanding" Collapsed="AdvancedCollapsed">
+                <StackPanel Spacing="12">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <NumberBox x:Name="JobConnections" Header="連線数（1–32）" Minimum="1" Maximum="32" SpinButtonPlacementMode="Compact"/>
+                        <NumberBox x:Name="JobSpeed" Grid.Column="1" Header="限速 KiB/s（0 不限）" Minimum="0" Maximum="10485760" SpinButtonPlacementMode="Compact"/>
+                    </Grid>
+                    <TextBox x:Name="ExpectedHash" Header="下載後核對 SHA-256（選填，僅 HTTP）" MaxLength="64" PlaceholderText="貼上來源公布的 64 位校驗碼"/>
+                </StackPanel>
+            </Expander>
+            <TextBlock x:Name="PromptError" Grid.Row="8" Grid.ColumnSpan="2" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Assertive"/>
         </Grid>
 
         <!-- A quiet footer strip, separated by a hairline rather than a panel. -->

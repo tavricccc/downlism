@@ -22,6 +22,16 @@ public partial class App : Application
     private TrayIcon? _tray;
     private AppShutdownSignal? _shutdownSignal;
     private bool _exiting;
+    private DispatcherQueueTimer? _trayRefresh;
+
+    public static Downlism.Core.Settings.AppSettings CurrentSettings =>
+        ((App)Current)._window?.Settings ?? Downlism.Core.Settings.AppSettings.Load();
+    public static string ThemePreference { get; private set; } = "System";
+    public static void ApplyTheme(FrameworkElement root, string theme)
+    {
+        ThemePreference = theme;
+        root.RequestedTheme = theme switch { "Light" => ElementTheme.Light, "Dark" => ElementTheme.Dark, _ => ElementTheme.Default };
+    }
 
     public App() => InitializeComponent();
 
@@ -57,7 +67,7 @@ public partial class App : Application
             // reboot quietly gives every download back to the browser -- which looks like the
             // app failing rather than like a setting nobody switched on. Visible and
             // reversible in both the tray menu and the settings flyout.
-            EnableLoginStartupQuietly();
+            // Startup registration is now an explicit preference, not an install side effect.
             _window.RefreshLaunchAtLogin();
         }
 
@@ -67,7 +77,8 @@ public partial class App : Application
         {
             if (_exiting) return;
             closing.Cancel = true;
-            ShowWindow(Handle, Hide);
+            if (_window.Settings.CloseToTray) ShowWindow(Handle, Hide);
+            else dispatcher.TryEnqueue(ExitApplication);
         };
 
         _tray = new TrayIcon { LaunchesAtLogin = _loginStartup.IsEnabled() };
@@ -81,6 +92,14 @@ public partial class App : Application
         _window.LaunchAtLoginChanged += (_, _) => _tray.LaunchesAtLogin = _loginStartup.IsEnabled();
 
         Queue.Changed += OnQueueChanged;
+        _trayRefresh = dispatcher.CreateTimer();
+        _trayRefresh.Interval = TimeSpan.FromMilliseconds(500);
+        _trayRefresh.Tick += (_, _) =>
+        {
+            var active = Queue.Jobs.Where(job => job.State == DownloadState.Running).ToArray();
+            _tray.UpdateTooltip(active.Length, active.Sum(job => job.Progress?.BytesPerSecond ?? 0));
+        };
+        _trayRefresh.Start();
 
         // Lets the installer ask this process to release its files before an update.
         _shutdownSignal = new AppShutdownSignal(
@@ -112,22 +131,25 @@ public partial class App : Application
 
     private void OnQueueChanged(DownloadJob job)
     {
-        if (_tray is null) return;
-
-        var active = Queue.Jobs.Where(entry => entry.State == DownloadState.Running).ToArray();
-        var speed = active.Sum(entry => entry.Progress?.BytesPerSecond ?? 0);
-        _tray.UpdateTooltip(active.Length, speed);
-
-        // The download window remains open through download and completion (like IDM),
-        // so completion does not pop up a system notification.
-        if (job.State == DownloadState.Failed && _announced.Add(job.Id))
+        var state = job.State;
+        if (state is DownloadState.Running or DownloadState.Removed)
         {
-            _tray.Announce("下載失敗", $"{job.FileName}：{job.Error}");
+            _announced.TryRemove(job.Id, out _);
+            return;
         }
+        if (state is not (DownloadState.Failed or DownloadState.Completed) || !_announced.TryAdd(job.Id, 0)) return;
+        var title = state == DownloadState.Completed ? "下載完成" : "下載失敗";
+        var message = state == DownloadState.Completed ? job.FileName : $"{job.FileName}：{job.Error}";
+        _window?.DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_window is null) return;
+            if ((state == DownloadState.Completed && _window.Settings.NotifyOnComplete) ||
+                (state == DownloadState.Failed && _window.Settings.NotifyOnFailure)) _tray?.Announce(title, message);
+        });
     }
 
     /// <summary>Jobs already announced, so a later state change does not repeat the balloon.</summary>
-    private readonly HashSet<Guid> _announced = [];
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, byte> _announced = new();
 
     private void EnableLoginStartupQuietly()
     {
@@ -173,6 +195,9 @@ public partial class App : Application
         _exiting = true;
 
         Queue.Changed -= OnQueueChanged;
+        _trayRefresh?.Stop();
+        Queue.PauseAll();
+        _window?.SaveBeforeExit();
         _ingest?.Dispose();
         _shutdownSignal?.Dispose();
         _tray?.Dispose();

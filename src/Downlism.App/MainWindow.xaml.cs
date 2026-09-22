@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Downlism.App.Services;
@@ -8,6 +9,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Storage.Pickers;
 
 namespace Downlism.App;
 
@@ -16,598 +18,406 @@ public sealed partial class MainWindow : Window
     private readonly ObservableCollection<DownloadRowViewModel> _rows = [];
     private readonly ObservableCollection<DownloadRowViewModel> _visibleRows = [];
     private readonly Dictionary<Guid, DownloadRowViewModel> _byId = [];
+    private readonly Dictionary<Guid, (DownloadRequest Request, DownloadState State)> _persisted = [];
+    private readonly ConcurrentDictionary<Guid, DownloadJob> _changes = new();
     private readonly DispatcherQueue _dispatcher;
+    private readonly DispatcherQueueTimer _refresh;
     private readonly DownloadStore _store = new(DownloadStore.DefaultPath);
-    private readonly LoginStartupService _loginStartup = new();
     private AppSettings _settings = AppSettings.Load();
+    private SettingsWindow? _settingsWindow;
     private string? _lastClipboardUrl;
-    private long _bytesPerSecond;
-
-    /// <summary>
-    /// False until the settings controls have been filled in. Selecting an item raises
-    /// SelectionChanged, and without this the constructor would write every setting straight
-    /// back out again before the window is even shown.
-    /// </summary>
     private bool _ready;
+    private bool _dialogOpen;
 
     public MainWindow()
     {
         InitializeComponent();
-
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         Downloads.ItemsSource = _visibleRows;
-
         SystemBackdrop = new Microsoft.UI.Xaml.Media.MicaBackdrop();
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(1040, 660));
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(1120, 720));
         AppWindow.SetIcon("Assets/Downlism.ico");
-
+        App.ApplyTheme(Root, _settings.Theme);
         App.Queue.Changed += OnJobChanged;
+        _refresh = _dispatcher.CreateTimer();
+        _refresh.Interval = TimeSpan.FromMilliseconds(250);
+        _refresh.Tick += (_, _) => FlushChanges();
+        _refresh.Start();
         Closed += (_, _) =>
         {
-            App.Queue.Changed -= OnJobChanged;
+            _refresh.Stop(); App.Queue.Changed -= OnJobChanged;
             Clipboard.ContentChanged -= OnClipboardChanged;
+            _settingsWindow?.Close();
         };
-
-        _bytesPerSecond = _settings.BytesPerSecond;
-        // Read from the Run key rather than from settings.json: the registry is where the
-        // choice actually lives, and a copy in the settings file would disagree with it the
-        // first time the value is removed from outside the app.
-        LaunchAtLogin.IsChecked = _loginStartup.IsEnabled();
-        SortIntoCategories.IsChecked = _settings.SortIntoCategories;
-        WatchClipboard.IsChecked = _settings.WatchClipboard;
-        AskOnCapture.IsChecked = _settings.PromptOnCapture;
-
-        Select(Connections, _settings.Connections);
-        Select(ConcurrentDownloads, _settings.ConcurrentDownloads);
-        Select(SpeedLimit, _settings.BytesPerSecond);
-        _ready = true;
-
-        App.Queue.Retry = new RetryPolicy(Math.Max(1, _settings.RetryAttempts));
-        // Applied here rather than at the queue's construction, which happens before any
-        // settings have been read. Without this the stored limit was written, shown and ignored.
-        App.Queue.SetConcurrency(Math.Clamp(_settings.ConcurrentDownloads, 1, 16));
-        _ = App.Queue.SetTorrentRateLimitAsync(_settings.BytesPerSecond);
+        ConfigureQueue();
         if (_settings.WatchClipboard) Clipboard.ContentChanged += OnClipboardChanged;
-
         RestoreHistory();
+        _ready = true;
         RefreshDownloadView();
     }
 
-    /// <summary>
-    /// Brings back the list from the previous session. Nothing is restarted automatically: an
-    /// app that reopens and immediately saturates the connection is a nuisance, and the partial
-    /// files are still on disk, so resuming is one click away.
-    /// </summary>
-    private void RestoreHistory()
-    {
-        foreach (var stored in _store.Load())
-        {
-            if (!TransferRouting.TryParse(stored.Url, out var uri)) continue;
-
-            var job = App.Queue.Restore(
-                stored.Id,
-                new DownloadRequest
-                {
-                    Uri = uri,
-                    Kind = stored.Kind,
-                    PageUrl = stored.PageUrl,
-                    MediaOutput = stored.MediaOutput,
-                    MediaQuality = stored.MediaQuality,
-                    Directory = stored.Directory,
-                    FileName = stored.FileName,
-                    // Already the final directory; sorting again would nest a second folder.
-                    SortIntoCategories = false,
-                    Referrer = stored.Referrer,
-                },
-                stored.State == "Completed" ? DownloadState.Completed : DownloadState.Paused,
-                stored.Path);
-
-            Track(job, remember: false);
-        }
-    }
-
-    /// <summary>Called by the ingest listener from a background thread.</summary>
-    public void AddFromBrowser(CaptureRequest capture) => _dispatcher.TryEnqueue(() => Capture(capture));
-
-    /// <summary>
-    /// Opens the per-download window for a capture, or starts it outright if the person has
-    /// said they no longer want to be asked.
-    /// </summary>
-    /// <remarks>
-    /// Raising the whole list for every captured download would put a thousand-pixel window
-    /// over whatever they were reading in order to say one sentence. The prompt is the small
-    /// version of that, and it is also the only moment where the name and the folder can still
-    /// be changed without moving a finished file afterwards.
-    /// </remarks>
-    private void Capture(CaptureRequest capture)
-    {
-        if (!_settings.PromptOnCapture)
-        {
-            Track(App.Queue.Add(capture.Request));
-            return;
-        }
-
-        var window = new NewDownloadWindow(capture, Accept, StopAsking);
-        window.Activate();
-        window.ForceForeground();
-    }
-
-    /// <summary>
-    /// Takes the request back from the prompt. "Later" enters the row without starting it,
-    /// which is the same state a paused transfer is in, so the resume button already works.
-    /// </summary>
-    private DownloadJob Accept(DownloadRequest request, bool start)
-    {
-        RememberDownloadDefaults(request);
-
-        var job = start
-            ? App.Queue.Add(request)
-            : App.Queue.Restore(Guid.NewGuid(), request, DownloadState.Paused, null);
-        Track(job);
-        return job;
-    }
-
-    private void StopAsking(bool stop)
-    {
-        if (!stop) return;
-
-        _settings = _settings with { PromptOnCapture = false };
-        _settings.Save();
-        AskOnCapture.IsChecked = false;
-    }
-
-    /// <summary>
-    /// The choices made in the prompt become the defaults for the next one. They are only
-    /// remembered after Start or Later, so cancelling a prompt never changes preferences.
-    /// </summary>
-    private void RememberDownloadDefaults(DownloadRequest request)
-    {
-        var updated = _settings;
-        if (!string.IsNullOrWhiteSpace(request.Directory) && request.Directory != updated.DownloadFolder)
-        {
-            updated = updated with { DownloadFolder = request.Directory };
-        }
-
-        if (request.SortIntoCategories != updated.SortIntoCategories)
-        {
-            updated = updated with { SortIntoCategories = request.SortIntoCategories };
-            SortIntoCategories.IsChecked = request.SortIntoCategories;
-        }
-
-        if (updated == _settings) return;
-
-        _settings = updated;
-        _settings.Save();
-    }
-
-    private void OnJobChanged(DownloadJob job) => _dispatcher.TryEnqueue(() =>
-    {
-        if (!_byId.TryGetValue(job.Id, out var row)) return;
-
-        if (job.State == DownloadState.Removed)
-        {
-            _rows.Remove(row);
-            _byId.Remove(job.Id);
-            _store.Delete(job.Id);
-            RefreshDownloadView();
-            return;
-        }
-
-        row.Refresh();
-        RefreshDownloadView();
-
-        // Only settled states are written back. Persisting every progress sample would put a
-        // database write on a path that fires four times a second per transfer.
-        if (job.State is DownloadState.Completed or DownloadState.Failed or DownloadState.Paused)
-        {
-            Remember(job);
-        }
-    });
-
-    private void Track(DownloadJob job, bool remember = true)
-    {
-        var row = new DownloadRowViewModel(job);
-        row.Refresh();
-
-        // Newest first: the transfer a person just started is the one they want to watch.
-        _rows.Insert(0, row);
-        _byId[job.Id] = row;
-
-        if (remember) Remember(job);
-        RefreshDownloadView();
-    }
-
-    private void Remember(DownloadJob job) => _store.Save(new StoredDownload(
-        job.Id,
-        job.Request.Uri.AbsoluteUri,
-        job.Request.Directory,
-        job.FileName,
-        job.Request.Referrer,
-        job.State.ToString(),
-        job.Path,
-        DateTimeOffset.UtcNow,
-        job.Request.Kind,
-        job.Request.PageUrl,
-        job.Request.MediaOutput,
-        job.Request.MediaQuality));
-
-    private void RefreshDownloadView()
-    {
-        var filter = SelectedFilter();
-        var wanted = _rows.Where(row => MatchesFilter(row.Job.State, filter)).ToArray();
-
-        // Progress updates arrive several times a second. Rebuild only when a row crosses a
-        // filter boundary, otherwise the list would lose hover/focus state while bytes move.
-        if (!_visibleRows.SequenceEqual(wanted))
-        {
-            _visibleRows.Clear();
-            foreach (var row in wanted) _visibleRows.Add(row);
-        }
-
-        var active = _rows.Count(row => IsActive(row.Job.State));
-        var completed = _rows.Count(row => row.Job.State == DownloadState.Completed);
-        var speed = _rows
-            .Where(row => row.Job.State == DownloadState.Running)
-            .Sum(row => row.Job.Progress?.BytesPerSecond ?? 0);
-
-        Summary.Text = active > 0
-            ? $"{active} 個進行中 · {DownloadRowViewModel.Bytes((long)speed)}/s · {_rows.Count} 個下載"
-            : $"{_rows.Count} 個下載";
-        PauseAllButton.IsEnabled = active > 0;
-        ClearCompletedButton.IsEnabled = completed > 0;
-
-        var empty = _visibleRows.Count == 0;
-        EmptyState.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
-        Downloads.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
-
-        (EmptyTitle.Text, EmptyDescription.Text) = _rows.Count == 0
-            ? ("還沒有下載", "貼上下載連結、影片頁面網址或磁力連結，或從瀏覽器擴充功能接手下載。")
-            : filter switch
-            {
-                "active" => ("目前沒有進行中的下載", "開始新的下載，或到「需要處理」繼續已暫停的項目。"),
-                "completed" => ("還沒有完成的下載", "下載完成後會集中顯示在這裡。"),
-                "attention" => ("目前沒有需要處理的下載", "已暫停或失敗的項目會顯示在這裡。"),
-                _ => ("這個檢視沒有下載", "切換篩選條件即可查看其他下載。"),
-            };
-    }
-
-    private string SelectedFilter() =>
-        StatusFilter.SelectedItem is ComboBoxItem { Tag: string tag } ? tag : "all";
-
-    private static bool MatchesFilter(DownloadState state, string filter) => filter switch
-    {
-        "active" => IsActive(state),
-        "completed" => state == DownloadState.Completed,
-        "attention" => state is DownloadState.Paused or DownloadState.Failed,
-        _ => state != DownloadState.Removed,
-    };
-
-    private static bool IsActive(DownloadState state) =>
-        state is DownloadState.Queued or DownloadState.Running or DownloadState.Retrying;
-
-    private void StatusFilterChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_ready) RefreshDownloadView();
-    }
-
-    private void ClearCompletedClick(object sender, RoutedEventArgs e)
-    {
-        foreach (var id in _rows
-                     .Where(row => row.Job.State == DownloadState.Completed)
-                     .Select(row => row.Id)
-                     .ToArray())
-        {
-            App.Queue.Remove(id);
-        }
-    }
-
-    private async void PasteClick(object sender, RoutedEventArgs e)
-    {
-        if (await ClipboardLinkAsync() is not { } uri)
-        {
-            // Say what is wrong and what to do, not that something failed.
-            Show("剪貼簿裡沒有網址。複製下載連結、影片頁面網址或磁力連結後再試一次。", InfoBarSeverity.Informational);
-            return;
-        }
-
-        Start(uri, TransferRouting.For(uri));
-    }
-
-    /// <summary>
-    /// Sends whatever is on the clipboard to yt-dlp, whatever the URL looks like. The routing
-    /// rules only recognise manifests and a short list of well-known sites; this is how to say
-    /// "there is a video on this page" about the thousand sites they do not list.
-    /// </summary>
-    private async void PasteMediaClick(object sender, RoutedEventArgs e)
-    {
-        if (await ClipboardLinkAsync() is not { } uri)
-        {
-            Show("剪貼簿裡沒有網址。複製影片頁面的網址後再試一次。", InfoBarSeverity.Informational);
-            return;
-        }
-
-        if (uri.Scheme == TransferRouting.MagnetScheme)
-        {
-            Show("磁力連結不是影片頁面，直接按「貼上網址」即可。", InfoBarSeverity.Informational);
-            return;
-        }
-
-        if (!App.Queue.MediaToolsReady)
-        {
-            // Said before the wait rather than during it: a first run spends several minutes
-            // fetching yt-dlp and ffmpeg, and an unexplained pause reads as a hang.
-            Show("第一次下載影片會先取得 yt-dlp 與 ffmpeg，約 200 MB，之後不會再下載一次。", InfoBarSeverity.Informational);
-        }
-
-        Start(uri, TransferKind.Media);
-    }
-
-    private async Task<Uri?> ClipboardLinkAsync()
-    {
-        var content = Clipboard.GetContent();
-        if (!content.Contains(StandardDataFormats.Text)) return null;
-
-        var text = (await content.GetTextAsync()).Trim();
-        return TransferRouting.TryParse(text, out var uri) ? uri : null;
-    }
-
-    /// <summary>
-    /// Offers a link in the per-download window rather than starting it. The folder still
-    /// defaults to a category of the Downloads folder, so the usual undifferentiated pile is
-    /// avoided without anyone having to choose anything.
-    /// </summary>
-    private void Start(Uri uri, TransferKind kind)
-    {
-        var request = new DownloadRequest
-        {
-            Uri = uri,
-            Kind = kind,
-            // For media the URL is both the target and the page yt-dlp resolves. The other two
-            // engines have no page involved at all.
-            PageUrl = kind == TransferKind.Media ? uri.AbsoluteUri : null,
-            Directory = IngestListener.DownloadFolder(_settings),
-            SortIntoCategories = _settings.SortIntoCategories,
-            Connections = _settings.Connections,
-            BytesPerSecond = _bytesPerSecond,
-        };
-
-        // A link added by hand always asks, whatever the capture setting says: the person is
-        // already here, and this is where the name and the folder get decided.
-        var window = new NewDownloadWindow(new CaptureRequest(request, 0), Accept);
-        window.Activate();
-        window.ForceForeground();
-    }
-
-    /// <summary>Read by the ingest listener so browser handovers follow the same choices.</summary>
     public AppSettings Settings => _settings;
-
-    private void WatchClipboardClick(object sender, RoutedEventArgs e)
-    {
-        var watch = WatchClipboard.IsChecked == true;
-        _settings = _settings with { WatchClipboard = watch };
-        _settings.Save();
-
-        Clipboard.ContentChanged -= OnClipboardChanged;
-        if (watch) Clipboard.ContentChanged += OnClipboardChanged;
-    }
-
-    /// <summary>
-    /// Picks the item whose Tag is this number, falling back to the first. The tags are the
-    /// values themselves, so the stored setting survives the list being reordered or extended.
-    /// </summary>
-    private static void Select(ComboBox box, long value)
-    {
-        foreach (var item in box.Items.OfType<ComboBoxItem>())
-        {
-            if (item.Tag is not string tag || !long.TryParse(tag, out var candidate) || candidate != value) continue;
-
-            box.SelectedItem = item;
-            return;
-        }
-
-        box.SelectedIndex = 0;
-    }
-
-    /// <summary>Reads the selected Tag, or null when the box holds something unexpected.</summary>
-    private static long? SelectedValue(ComboBox box) =>
-        box.SelectedItem is ComboBoxItem { Tag: string tag } && long.TryParse(tag, out var value) ? value : null;
-
-    private void ConnectionsChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_ready || SelectedValue(Connections) is not { } value) return;
-
-        // Applies to transfers started from here on. Re-planning the segments of one already
-        // running would mean discarding the ranges it has partly filled.
-        _settings = _settings with { Connections = (int)value };
-        _settings.Save();
-    }
-
-    private void ConcurrentDownloadsChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (!_ready || SelectedValue(ConcurrentDownloads) is not { } value) return;
-
-        _settings = _settings with { ConcurrentDownloads = (int)value };
-        _settings.Save();
-        App.Queue.SetConcurrency((int)value);
-    }
-
-    /// <summary>Shows the four steps that load the browser extension.</summary>
-    private void ExtensionGuideClick(object sender, RoutedEventArgs e) => ShowExtensionGuide();
-
-    public void ShowExtensionGuide() => new ExtensionGuideWindow().Activate();
-
-    /// <summary>
-    /// Shows the extension guide once this window has drawn, for the launch that follows an
-    /// install. Must be called before the window is activated.
-    /// </summary>
-    /// <remarks>
-    /// Hung off this window's own Loaded rather than off Activated, which has usually already
-    /// fired by the time the app has anything to subscribe to, and then queued at low priority
-    /// so the guide opens onto a list that has finished its first layout instead of racing it.
-    /// </remarks>
-    public void ShowExtensionGuideOnFirstFrame()
-    {
-        Root.Loaded += OnFirstLoad;
-
-        void OnFirstLoad(object sender, RoutedEventArgs e)
-        {
-            Root.Loaded -= OnFirstLoad;
-            _dispatcher.TryEnqueue(DispatcherQueuePriority.Low, ShowExtensionGuide);
-        }
-    }
-
-    private void AskOnCaptureClick(object sender, RoutedEventArgs e)
-    {
-        // The way back. Without a control here, the checkbox in the prompt would be a one-way
-        // door out of a feature.
-        _settings = _settings with { PromptOnCapture = AskOnCapture.IsChecked == true };
-        _settings.Save();
-    }
-
-    /// <summary>
-    /// Raised after the window changes the login-startup setting, so the tray menu's tick does
-    /// not go on claiming the opposite of what the settings flyout now shows.
-    /// </summary>
     public event EventHandler? LaunchAtLoginChanged;
+    public void RefreshLaunchAtLogin() { }
 
-    /// <summary>Re-reads the Run key, for when the tray menu was the one that changed it.</summary>
-    public void RefreshLaunchAtLogin() => LaunchAtLogin.IsChecked = _loginStartup.IsEnabled();
+    private void ConfigureQueue()
+    {
+        App.Queue.Retry = new RetryPolicy(_settings.RetryAttempts, _settings.RetryDelaySeconds);
+        App.Queue.SetConcurrency(_settings.ConcurrentDownloads);
+        _ = ApplyTorrentRateAsync();
+    }
+    private async Task ApplyTorrentRateAsync()
+    {
+        try { await App.Queue.SetTorrentRateLimitAsync(_settings.BytesPerSecond); }
+        catch (Exception ex) { Show("BitTorrent 限速未套用：" + ex.Message, InfoBarSeverity.Warning); }
+    }
+    private void ApplySettings(AppSettings settings)
+    {
+        settings.Save();
+        _settings = settings;
+        App.ApplyTheme(Root, settings.Theme);
+        Clipboard.ContentChanged -= OnClipboardChanged;
+        if (settings.WatchClipboard) Clipboard.ContentChanged += OnClipboardChanged;
+        ConfigureQueue();
+        LaunchAtLoginChanged?.Invoke(this, EventArgs.Empty);
+        Show("設定已儲存。連線、分類與 HTTP／影片限速套用於新下載。", InfoBarSeverity.Success);
+    }
+    private void SettingsClick(object sender, RoutedEventArgs e)
+    {
+        if (_settingsWindow is not null) { _settingsWindow.Activate(); return; }
+        _settingsWindow = new SettingsWindow(_settings, ApplySettings);
+        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow.Activate();
+    }
 
-    private void LaunchAtLoginClick(object sender, RoutedEventArgs e)
+    private void RestoreHistory()
     {
         try
         {
-            _loginStartup.SetEnabled(LaunchAtLogin.IsChecked == true);
-            LaunchAtLoginChanged?.Invoke(this, EventArgs.Empty);
+            // Track inserts at the front. Reverse the database's newest-first ordering once.
+            foreach (var stored in _store.Load().Reverse())
+            {
+                if (!TransferRouting.TryParse(stored.Url, out var uri)) continue;
+                var job = App.Queue.Restore(stored.Id, new DownloadRequest
+                {
+                    Uri = uri, Kind = stored.Kind, PageUrl = stored.PageUrl, MediaOutput = stored.MediaOutput,
+                    MediaQuality = stored.MediaQuality, Directory = stored.Directory, FileName = string.IsNullOrEmpty(stored.FileName) ? null : stored.FileName,
+                    SortIntoCategories = stored.SortIntoCategories, CategoryRules = stored.CategoryRules,
+                    Connections = stored.Connections, BytesPerSecond = stored.BytesPerSecond,
+                    ReadTimeoutSeconds = stored.ReadTimeoutSeconds, ExpectedSha256 = stored.ExpectedSha256,
+                    Referrer = stored.Referrer,
+                }, stored.State == "Completed" ? DownloadState.Completed : DownloadState.Paused, stored.Path);
+                Track(job, false);
+            }
+            if (_settings.ResumeOnStartup) App.Queue.ResumeAll();
         }
-        catch (Exception exception) when (exception is InvalidOperationException or UnauthorizedAccessException)
-        {
-            // Nothing was written, so the checkbox must not keep the state it was clicked into.
-            LaunchAtLogin.IsChecked = _loginStartup.IsEnabled();
-        }
+        catch (Exception ex) { Show("無法完整讀取下載紀錄：" + ex.Message, InfoBarSeverity.Error); }
     }
 
-    private void SortIntoCategoriesClick(object sender, RoutedEventArgs e)
+    public void AddFromBrowser(CaptureRequest capture) => _dispatcher.TryEnqueue(() =>
     {
-        _settings = _settings with { SortIntoCategories = SortIntoCategories.IsChecked == true };
-        _settings.Save();
+        if (FindDuplicate(capture.Request) is { } duplicate)
+        {
+            Show($"清單中已有 {duplicate.FileName}，沒有重複新增。", InfoBarSeverity.Informational);
+            return;
+        }
+        if (!_settings.PromptOnCapture) { Track(App.Queue.Add(capture.Request)); return; }
+        OpenPrompt(capture, true);
+    });
+
+    private void OpenPrompt(CaptureRequest capture, bool browser = false)
+    {
+        var window = new NewDownloadWindow(capture, Accept, browser ? StopAsking : null);
+        window.Activate();
+        if (_settings.PromptAlwaysOnTop) window.ForceForeground();
+    }
+    private DownloadJob? FindDuplicate(DownloadRequest request) => !_settings.PreventDuplicateDownloads ? null :
+        App.Queue.Jobs.FirstOrDefault(job => job.State is not (DownloadState.Completed or DownloadState.Removed) &&
+            job.Request.Uri.AbsoluteUri == request.Uri.AbsoluteUri && job.Request.Kind == request.Kind &&
+            job.Request.MediaOutput == request.MediaOutput && job.Request.MediaQuality == request.MediaQuality);
+
+    private DownloadJob Accept(DownloadRequest request, bool start)
+    {
+        if (FindDuplicate(request) is { } duplicate)
+        {
+            Show("相同網址已在清單中，使用原有項目。", InfoBarSeverity.Informational);
+            if (start) App.Queue.Resume(duplicate.Id);
+            return duplicate;
+        }
+        try
+        {
+            var updated = _settings with { DownloadFolder = request.Directory, SortIntoCategories = request.SortIntoCategories };
+            updated.Save(); _settings = updated;
+        }
+        catch (Exception ex) { Show("下載已加入，但未儲存預設資料夾：" + ex.Message, InfoBarSeverity.Warning); }
+        var job = start ? App.Queue.Add(request) : App.Queue.Restore(Guid.NewGuid(), request, DownloadState.Paused, null);
+        Track(job); return job;
+    }
+    private void StopAsking(bool stop)
+    {
+        if (!stop) return;
+        try { ApplySettings(_settings with { PromptOnCapture = false }); }
+        catch (Exception ex) { Show("設定未儲存：" + ex.Message, InfoBarSeverity.Error); }
+    }
+    private void OnJobChanged(DownloadJob job) => _changes[job.Id] = job;
+    private void FlushChanges()
+    {
+        if (_changes.IsEmpty) return;
+        foreach (var id in _changes.Keys)
+        {
+            if (!_changes.TryRemove(id, out var job) || !_byId.TryGetValue(id, out var row)) continue;
+            if (job.State == DownloadState.Removed)
+            {
+                _rows.Remove(row); _byId.Remove(id); _persisted.Remove(id);
+                try { _store.Delete(id); } catch (Exception ex) { Show("紀錄未刪除：" + ex.Message, InfoBarSeverity.Error); }
+                continue;
+            }
+            row.Refresh();
+            var settled = job.State is DownloadState.Completed or DownloadState.Failed or DownloadState.Paused;
+            if (!_persisted.TryGetValue(id, out var prior) || prior.Request != job.Request || (settled && prior.State != job.State)) Remember(job);
+        }
+        RefreshDownloadView();
+    }
+    private void Track(DownloadJob job, bool remember = true)
+    {
+        var row = new DownloadRowViewModel(job); row.Refresh();
+        _rows.Insert(0, row); _byId[job.Id] = row;
+        if (remember) Remember(job); else _persisted[job.Id] = (job.Request, job.State);
+        if (_ready) RefreshDownloadView();
+    }
+    private void Remember(DownloadJob job)
+    {
+        try
+        {
+            var r = job.Request;
+            _store.Save(new StoredDownload(job.Id, r.Uri.AbsoluteUri, r.Directory, r.FileName ?? "", r.Referrer,
+                job.State.ToString(), job.Path, DateTimeOffset.UtcNow, r.Kind, r.PageUrl, r.MediaOutput, r.MediaQuality,
+                r.Connections, r.BytesPerSecond, r.ReadTimeoutSeconds, r.SortIntoCategories, r.CategoryRules, r.ExpectedSha256));
+            _persisted[job.Id] = (r, job.State);
+        }
+        catch (Exception ex) { Show("下載紀錄未儲存：" + ex.Message, InfoBarSeverity.Error); }
+    }
+    public void SaveBeforeExit()
+    {
+        FlushChanges();
+        foreach (var job in App.Queue.Jobs) Remember(job);
     }
 
-    /// <summary>
-    /// Offers a copied link rather than starting it. Downloading whatever lands on the
-    /// clipboard would be a trap: people copy links to read them, to share them, to search
-    /// them. Asking costs one click and is never wrong.
-    /// </summary>
+    private static bool IsActive(DownloadState state) => state is DownloadState.Queued or DownloadState.Running or DownloadState.Retrying;
+    private static string Tag(ComboBox box) => (box.SelectedItem as ComboBoxItem)?.Tag as string ?? "";
+    private void RefreshDownloadView()
+    {
+        var filter = Tag(StatusFilter);
+        var query = SearchBox.Text.Trim();
+        IEnumerable<DownloadRowViewModel> wanted = _rows.Where(row => (filter switch
+        {
+            "active" => IsActive(row.Job.State), "completed" => row.Job.State == DownloadState.Completed,
+            "attention" => row.Job.State is DownloadState.Paused or DownloadState.Failed,
+            _ => row.Job.State != DownloadState.Removed,
+        }) && (query.Length == 0 || row.FileName.Contains(query, StringComparison.CurrentCultureIgnoreCase) ||
+            row.Job.Request.Uri.Host.Contains(query, StringComparison.OrdinalIgnoreCase)));
+        wanted = Tag(SortOrder) switch
+        {
+            "name" => wanted.OrderBy(row => row.FileName, StringComparer.CurrentCultureIgnoreCase),
+            "source" => wanted.OrderBy(row => row.Job.Request.Uri.Host, StringComparer.OrdinalIgnoreCase),
+            _ => wanted,
+        };
+        var target = wanted.ToArray();
+        // Reconcile only changed positions rather than Clear/Add the whole virtualized list.
+        var keep = target.Select(row => row.Id).ToHashSet();
+        for (var i = _visibleRows.Count - 1; i >= 0; i--) if (!keep.Contains(_visibleRows[i].Id)) _visibleRows.RemoveAt(i);
+        for (var i = 0; i < target.Length; i++)
+        {
+            if (i < _visibleRows.Count && ReferenceEquals(_visibleRows[i], target[i])) continue;
+            var existing = _visibleRows.IndexOf(target[i]);
+            if (existing >= 0) _visibleRows.Move(existing, i); else _visibleRows.Insert(i, target[i]);
+        }
+        var active = _rows.Count(row => IsActive(row.Job.State));
+        var speed = _rows.Where(row => row.Job.State == DownloadState.Running).Sum(row => row.Job.Progress?.BytesPerSecond ?? 0);
+        Summary.Text = $"{_visibleRows.Count} / {_rows.Count} 個下載 · {active} 個進行中 · {DownloadRowViewModel.Bytes((long)speed)}/s · 已選取 {Downloads.SelectedItems.Count} 個";
+        PauseAllButton.IsEnabled = active > 0;
+        ResumeAllButton.IsEnabled = _rows.Any(row => row.Job.State is DownloadState.Paused or DownloadState.Failed);
+        ClearCompletedButton.IsEnabled = _rows.Any(row => row.Job.State == DownloadState.Completed);
+        EmptyState.Visibility = target.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        Downloads.Visibility = target.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        EmptyTitle.Text = _rows.Count == 0 ? "還沒有下載" : "沒有符合條件的下載";
+        EmptyDescription.Text = _rows.Count == 0 ? "貼上下載連結、影片頁面或磁力連結。多個網址可用「批次新增」，不必逐一開視窗。" : "試試其他關鍵字，或切換回「全部下載」。";
+    }
+    private void StatusFilterChanged(object sender, SelectionChangedEventArgs e) { if (_ready) RefreshDownloadView(); }
+    private void SearchChanged(object sender, TextChangedEventArgs e) { if (_ready) RefreshDownloadView(); }
+    private void DownloadSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_ready) return;
+        var prefix = Summary.Text.Split(" · 已選取", StringSplitOptions.None)[0];
+        Summary.Text = $"{prefix} · 已選取 {Downloads.SelectedItems.Count} 個";
+    }
+    private Guid[] SelectedIds() => Downloads.SelectedItems.OfType<DownloadRowViewModel>().Select(row => row.Id).ToArray();
+    private void PauseSelectedClick(object sender, RoutedEventArgs e) { foreach (var id in SelectedIds()) App.Queue.Pause(id); }
+    private void ResumeSelectedClick(object sender, RoutedEventArgs e) { foreach (var id in SelectedIds()) App.Queue.Resume(id); }
+    private void RemoveSelectedClick(object sender, RoutedEventArgs e) { foreach (var id in SelectedIds()) App.Queue.Remove(id); }
+    private void CopySelectedClick(object sender, RoutedEventArgs e)
+    {
+        var urls = Downloads.SelectedItems.OfType<DownloadRowViewModel>().Select(row => row.Job.Request.Uri.AbsoluteUri).ToArray();
+        if (urls.Length == 0) { Show("先選取要複製的下載。可按住 Ctrl 或 Shift 多選。", InfoBarSeverity.Informational); return; }
+        try { CopyText(string.Join(Environment.NewLine, urls)); Show("網址已複製。請勿公開含登入權杖的連結。", InfoBarSeverity.Success); }
+        catch (Exception ex) { Show("無法寫入剪貼簿：" + ex.Message, InfoBarSeverity.Error); }
+    }
+    private void ClearCompletedClick(object sender, RoutedEventArgs e)
+    { foreach (var id in _rows.Where(row => row.Job.State == DownloadState.Completed).Select(row => row.Id).ToArray()) App.Queue.Remove(id); }
+    private DownloadRequest NewRequest(Uri uri, TransferKind? kind = null) => new()
+    {
+        Uri = uri, Kind = kind ?? TransferRouting.For(uri), PageUrl = (kind ?? TransferRouting.For(uri)) == TransferKind.Media ? uri.AbsoluteUri : null,
+        Directory = IngestListener.DownloadFolder(_settings), SortIntoCategories = _settings.SortIntoCategories,
+        CategoryRules = _settings.CategoryRules, Connections = _settings.Connections,
+        BytesPerSecond = _settings.BytesPerSecond, ReadTimeoutSeconds = _settings.ReadTimeoutSeconds,
+    };
+    private async Task<string> ClipboardTextAsync()
+    {
+        var content = Clipboard.GetContent();
+        return content.Contains(StandardDataFormats.Text) ? (await content.GetTextAsync()).Trim() : "";
+    }
+    private async void PasteClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var text = await ClipboardTextAsync();
+            if (text.Contains('\n') || text.Contains('\r')) { await BatchAsync(text); return; }
+            if (!TransferRouting.TryParse(text, out var uri)) { Show("剪貼簿裡沒有有效網址。", InfoBarSeverity.Informational); return; }
+            OpenPrompt(new(NewRequest(uri), 0));
+        }
+        catch (Exception ex) { Show("無法讀取剪貼簿：" + ex.Message, InfoBarSeverity.Error); }
+    }
+    private async void PasteMediaClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (!TransferRouting.TryParse(await ClipboardTextAsync(), out var uri) || uri.Scheme == "magnet")
+            { Show("請先複製 HTTP 或 HTTPS 影片頁面網址。", InfoBarSeverity.Informational); return; }
+            OpenPrompt(new(NewRequest(uri, TransferKind.Media), 0));
+        }
+        catch (Exception ex) { Show("無法新增影片：" + ex.Message, InfoBarSeverity.Error); }
+    }
+    private async void BatchClick(object sender, RoutedEventArgs e) => await BatchAsync("");
+    private async Task BatchAsync(string text)
+    {
+        if (_dialogOpen) return;
+        _dialogOpen = true;
+        try
+        {
+            var input = new TextBox { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 180,
+                MaxLength = 1_048_576, PlaceholderText = "每行一個 HTTP、HTTPS 或 magnet 網址", Text = text };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(input, "批次網址");
+            var later = new CheckBox { Content = "只加入清單，稍後再下載", IsChecked = true };
+            var error = new TextBlock { TextWrapping = TextWrapping.Wrap, MaxWidth = 460 };
+            var panel = new StackPanel { Spacing = 12, MinWidth = 400 };
+            panel.Children.Add(new TextBlock { Text = "一次最多 500 個網址。會使用目前的下載資料夾與分類設定，重複網址只保留一份。", TextWrapping = TextWrapping.Wrap });
+            panel.Children.Add(input); panel.Children.Add(later); panel.Children.Add(error);
+            LinkList? parsed = null;
+            var dialog = new ContentDialog { XamlRoot = Root.XamlRoot, RequestedTheme = Root.ActualTheme, Title = "批次新增下載", Content = panel,
+                PrimaryButtonText = "加入清單", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Primary };
+            dialog.PrimaryButtonClick += (_, args) =>
+            {
+                try { parsed = LinkList.Parse(input.Text); }
+                catch (ArgumentException ex) { error.Text = ex.Message; args.Cancel = true; }
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary || parsed is null) return;
+            var added = 0;
+            var skipped = parsed.Duplicates;
+            // Batch additions avoid hundreds of list reconciliation passes.
+            _ready = false;
+            try
+            {
+                foreach (var uri in parsed.Links)
+                {
+                    var request = NewRequest(uri);
+                    if (FindDuplicate(request) is not null) { skipped++; continue; }
+                    Track(later.IsChecked == true ? App.Queue.Restore(Guid.NewGuid(), request, DownloadState.Paused, null) : App.Queue.Add(request));
+                    added++;
+                }
+            }
+            finally { _ready = true; RefreshDownloadView(); }
+            Show($"已加入 {added} 個下載，略過 {skipped} 個重複網址。", InfoBarSeverity.Success);
+        }
+        catch (Exception ex) { Show("批次新增未完成：" + ex.Message, InfoBarSeverity.Error); }
+        finally { _dialogOpen = false; }
+    }
+    private async void ImportLinksClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var picker = new FileOpenPicker(); picker.FileTypeFilter.Add(".txt");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var file = await picker.PickSingleFileAsync(); if (file is null) return;
+            if (new FileInfo(file.Path).Length > 1_048_576) throw new ArgumentException("網址清單最多 1 MiB。");
+            await BatchAsync(await File.ReadAllTextAsync(file.Path));
+        }
+        catch (Exception ex) { Show("匯入失敗：" + ex.Message, InfoBarSeverity.Error); }
+    }
+    private async void ExportLinksClick(object sender, RoutedEventArgs e)
+    {
+        if (_visibleRows.Count == 0) { Show("目前檢視沒有可匯出的下載。", InfoBarSeverity.Informational); return; }
+        try
+        {
+            var urls = _visibleRows.Select(row => row.Job.Request.Uri.AbsoluteUri).ToArray();
+            var picker = new FileSavePicker { SuggestedFileName = "Downlism-links" };
+            picker.FileTypeChoices.Add("網址清單（可能包含私人權杖，請勿公開）", new List<string> { ".txt" });
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var file = await picker.PickSaveFileAsync(); if (file is null) return;
+            await File.WriteAllLinesAsync(file.Path, urls);
+            Show($"已匯出 {urls.Length} 個網址。連結可能含登入權杖，請勿公開。", InfoBarSeverity.Success);
+        }
+        catch (Exception ex) { Show("匯出失敗：" + ex.Message, InfoBarSeverity.Error); }
+    }
     private async void OnClipboardChanged(object? sender, object e)
     {
         try
         {
-            var content = Clipboard.GetContent();
-            if (!content.Contains(StandardDataFormats.Text)) return;
-
-            var text = (await content.GetTextAsync()).Trim();
-            if (text == _lastClipboardUrl) return;
-            if (!TransferRouting.TryParse(text, out var uri)) return;
-
+            var text = await ClipboardTextAsync();
+            if (text == _lastClipboardUrl || !TransferRouting.TryParse(text, out var uri)) return;
             _lastClipboardUrl = text;
-            Offer(uri);
+            var button = new Button { Content = "新增下載" };
+            button.Click += (_, _) => { Notice.IsOpen = false; OpenPrompt(new(NewRequest(uri), 0)); };
+            Show("剪貼簿有下載連結，可確認後加入。", InfoBarSeverity.Informational);
+            Notice.ActionButton = button;
         }
-        catch (Exception exception) when (exception is UnauthorizedAccessException or ArgumentException)
-        {
-            // Another application was holding the clipboard; the next copy will work.
-        }
+        catch (Exception) { /* Clipboard may be held by another application. */ }
     }
-
-    private void Offer(Uri uri)
-    {
-        var kind = TransferRouting.For(uri);
-
-        var action = new Button { Content = "下載" };
-        action.Click += (_, _) =>
-        {
-            Notice.IsOpen = false;
-            Start(uri, kind);
-        };
-
-        Notice.ActionButton = action;
-
-        var what = kind switch
-        {
-            TransferKind.Torrent => $"磁力連結 {Downlism.Core.Http.SuggestedFileName.FromUri(uri)}",
-            TransferKind.Media => $"影片來源 {uri.Host}",
-            _ => Downlism.Core.Http.SuggestedFileName.FromUri(uri),
-        };
-
-        Show($"剪貼簿裡有 {what}", InfoBarSeverity.Informational);
-    }
-
     private async void HashClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: Guid id } || !_byId.TryGetValue(id, out var row)) return;
-        if (row.Job.Path is not { } path || !File.Exists(path)) return;
-
-        Notice.ActionButton = null;
-        Show("正在計算 SHA-256…", InfoBarSeverity.Informational);
-
+        if (sender is not FrameworkElement { Tag: Guid id } || !_byId.TryGetValue(id, out var row) || row.Job.Path is not { } path) return;
         try
         {
+            if (!File.Exists(path)) { Show("檔案已移動、刪除，或這個下載是資料夾。", InfoBarSeverity.Warning); return; }
+            Show("正在計算 SHA-256…", InfoBarSeverity.Informational);
             var hash = await FileHash.ComputeAsync(path, FileHash.Algorithm.Sha256);
-
-            // Copied rather than shown alone: the next thing anyone does with a checksum is
-            // compare it with one on a web page.
-            var package = new DataPackage();
-            package.SetText(hash);
-            Clipboard.SetContent(package);
-
-            Show($"SHA-256 已複製：{hash}", InfoBarSeverity.Success);
+            CopyText(hash); Show("SHA-256 已複製：" + hash, InfoBarSeverity.Success);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            Show("無法讀取檔案來計算雜湊。", InfoBarSeverity.Error);
-        }
+        catch (Exception ex) { Show("無法計算雜湊：" + ex.Message, InfoBarSeverity.Error); }
     }
-
+    private static void CopyText(string text) { var data = new DataPackage(); data.SetText(text); Clipboard.SetContent(data); }
     private void PauseAllClick(object sender, RoutedEventArgs e) => App.Queue.PauseAll();
-
+    private void ResumeAllClick(object sender, RoutedEventArgs e) => App.Queue.ResumeAll();
     private void PauseClick(object sender, RoutedEventArgs e) => WithId(sender, App.Queue.Pause);
-
     private void ResumeClick(object sender, RoutedEventArgs e) => WithId(sender, App.Queue.Resume);
-
     private void RemoveClick(object sender, RoutedEventArgs e) => WithId(sender, App.Queue.Remove);
-
     private void OpenFolderClick(object sender, RoutedEventArgs e) => WithId(sender, id =>
     {
         if (!_byId.TryGetValue(id, out var row) || row.Job.Path is not { } path) return;
-
-        // Selecting the file is more useful than opening the folder and leaving the person to
-        // find it among hundreds of others.
-        Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+        try
+        {
+            if (!File.Exists(path) && !Directory.Exists(path)) { Show("檔案已移動或刪除。", InfoBarSeverity.Warning); return; }
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex) { Show("無法開啟檔案位置：" + ex.Message, InfoBarSeverity.Error); }
     });
-
-    private void SpeedLimitChanged(object sender, SelectionChangedEventArgs e)
+    private static void WithId(object sender, Action<Guid> action) { if (sender is FrameworkElement { Tag: Guid id }) action(id); }
+    private void ExtensionGuideClick(object sender, RoutedEventArgs e) => ShowExtensionGuide();
+    public void ShowExtensionGuide() => new ExtensionGuideWindow().Activate();
+    public void ShowExtensionGuideOnFirstFrame()
     {
-        if (!_ready || SelectedValue(SpeedLimit) is not { } rate) return;
-
-        // Applies to transfers started from here on; changing the ceiling mid-flight would mean
-        // tearing down connections that are already moving bytes.
-        _bytesPerSecond = rate;
-        _settings = _settings with { BytesPerSecond = rate };
-        _settings.Save();
-
-        // BitTorrent throttles per session rather than per transfer, so the new ceiling has to
-        // reach torrents that are already running.
-        _ = App.Queue.SetTorrentRateLimitAsync(rate);
+        Root.Loaded += OnFirstLoad;
+        void OnFirstLoad(object sender, RoutedEventArgs e) { Root.Loaded -= OnFirstLoad; _dispatcher.TryEnqueue(DispatcherQueuePriority.Low, ShowExtensionGuide); }
     }
-
-    private static void WithId(object sender, Action<Guid> action)
-    {
-        if (sender is FrameworkElement { Tag: Guid id }) action(id);
-    }
-
     private void Show(string message, InfoBarSeverity severity)
-    {
-        Notice.Message = message;
-        Notice.Severity = severity;
-        Notice.IsOpen = true;
-    }
+    { Notice.ActionButton = null; Notice.Message = message; Notice.Severity = severity; Notice.IsOpen = true; }
 }

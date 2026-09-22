@@ -105,6 +105,8 @@ public sealed class IngestListener(
                 : message.FileName,
             Connections = current.Connections,
             BytesPerSecond = current.BytesPerSecond,
+            ReadTimeoutSeconds = current.ReadTimeoutSeconds,
+            CategoryRules = current.CategoryRules,
             Cookies = message.Cookies,
             Referrer = message.Referrer,
             UserAgent = message.UserAgent,

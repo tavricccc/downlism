@@ -1,306 +1,78 @@
-<Window
-    x:Class="Downlism.App.MainWindow"
+<Window x:Class="Downlism.App.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:Downlism.App.Controls"
-    xmlns:vm="using:Downlism.App.ViewModels"
-    Title="Downlism">
-
-    <Grid x:Name="Root" RowSpacing="0">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
-
-        <!-- Command bar. Three actions on the left, and on the right the two things that are
-             not about one transfer: the browser it is fed from, and the settings that apply to
-             every transfer. The settings used to sit out here in a row that grew one control
-             per release and would not have survived another. -->
-        <Grid Padding="20,16,20,14" ColumnSpacing="10">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <Button x:Name="PasteButton" Style="{ThemeResource AccentButtonStyle}" Click="PasteClick"
-                    AutomationProperties.Name="貼上網址">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon FontSize="14" Glyph="&#xE77F;" />
-                    <TextBlock Text="貼上網址" />
-                </StackPanel>
-            </Button>
-
-            <Button Grid.Column="1" Click="PasteMediaClick" AutomationProperties.Name="貼上影片頁面"
-                    ToolTipService.ToolTip="把剪貼簿裡的頁面網址交給 yt-dlp">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon FontSize="14" Glyph="&#xE714;" />
-                    <TextBlock Text="貼上影片頁面" />
-                </StackPanel>
-            </Button>
-
-            <Button x:Name="PauseAllButton" Grid.Column="2" Content="全部暫停" Click="PauseAllClick"
-                    AutomationProperties.Name="全部暫停" />
-
-            <Button Grid.Column="4" Click="ExtensionGuideClick" AutomationProperties.Name="瀏覽器擴充功能"
-                    ToolTipService.ToolTip="怎麼把擴充功能裝進 Chrome 或 Edge">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon FontSize="14" Glyph="&#xE774;" />
-                    <TextBlock Text="瀏覽器擴充功能" />
-                </StackPanel>
-            </Button>
-
-            <Button Grid.Column="5" AutomationProperties.Name="設定" ToolTipService.ToolTip="設定">
-                <FontIcon FontSize="14" Glyph="&#xE713;" />
-                <Button.Flyout>
-                    <Flyout Placement="BottomEdgeAlignedRight">
-                        <!-- Numbers first, switches after: the three drop-downs are what people
-                             come here to change, and the switches are set once and forgotten. -->
-                        <StackPanel Spacing="14" Width="304">
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="分段連線數" />
-                                <TextBlock Text="每個下載同時開幾條連線。影片下載用同樣的數字同時抓片段；BitTorrent 自己管理節點，不受這裡影響。"
-                                           TextWrapping="Wrap" FontSize="11.5"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <ComboBox x:Name="Connections" HorizontalAlignment="Stretch"
-                                          SelectionChanged="ConnectionsChanged"
-                                          AutomationProperties.Name="分段連線數">
-                                    <ComboBoxItem Content="1 條（不分段）" Tag="1" />
-                                    <ComboBoxItem Content="2 條" Tag="2" />
-                                    <ComboBoxItem Content="4 條" Tag="4" />
-                                    <ComboBoxItem Content="8 條" Tag="8" />
-                                    <ComboBoxItem Content="16 條" Tag="16" />
-                                </ComboBox>
-                            </StackPanel>
-
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="同時下載數" />
-                                <TextBlock Text="超過的排隊等候。開太多只會讓每一個都變慢。"
-                                           TextWrapping="Wrap" FontSize="11.5"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <ComboBox x:Name="ConcurrentDownloads" HorizontalAlignment="Stretch"
-                                          SelectionChanged="ConcurrentDownloadsChanged"
-                                          AutomationProperties.Name="同時下載數">
-                                    <ComboBoxItem Content="1 個" Tag="1" />
-                                    <ComboBoxItem Content="2 個" Tag="2" />
-                                    <ComboBoxItem Content="3 個" Tag="3" />
-                                    <ComboBoxItem Content="5 個" Tag="5" />
-                                    <ComboBoxItem Content="8 個" Tag="8" />
-                                </ComboBox>
-                            </StackPanel>
-
-                            <StackPanel Spacing="4">
-                                <TextBlock Text="速度上限" />
-                                <ComboBox x:Name="SpeedLimit" HorizontalAlignment="Stretch"
-                                          SelectionChanged="SpeedLimitChanged"
-                                          AutomationProperties.Name="速度上限">
-                                    <ComboBoxItem Content="不限制" Tag="0" />
-                                    <ComboBoxItem Content="1 MB/s" Tag="1048576" />
-                                    <ComboBoxItem Content="5 MB/s" Tag="5242880" />
-                                    <ComboBoxItem Content="20 MB/s" Tag="20971520" />
-                                </ComboBox>
-                            </StackPanel>
-
-                            <Border BorderThickness="0,1,0,0" Margin="0,2,0,0"
-                                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" />
-
-                            <StackPanel Spacing="10">
-                                <CheckBox x:Name="LaunchAtLogin" Content="開機時在背景啟動" MinWidth="0"
-                                          Click="LaunchAtLoginClick" AutomationProperties.Name="開機時在背景啟動" />
-                                <CheckBox x:Name="SortIntoCategories" Content="依類型分類存放" MinWidth="0"
-                                          Click="SortIntoCategoriesClick" AutomationProperties.Name="依類型分類存放" />
-                                <CheckBox x:Name="WatchClipboard" Content="監看剪貼簿" MinWidth="0"
-                                          Click="WatchClipboardClick" AutomationProperties.Name="監看剪貼簿" />
-                                <CheckBox x:Name="AskOnCapture" Content="瀏覽器接手前先問" MinWidth="0"
-                                          Click="AskOnCaptureClick" AutomationProperties.Name="瀏覽器接手前先問" />
-                            </StackPanel>
-                        </StackPanel>
-                    </Flyout>
-                </Button.Flyout>
-            </Button>
-        </Grid>
-
-        <!-- Keep history navigable without turning the command bar into a row of permanent
-             tabs. The summary answers the two questions that matter at a glance: how many are
-             active and how much bandwidth they are using. -->
-        <Grid Grid.Row="1" Padding="20,0,20,12" ColumnSpacing="12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <ComboBox x:Name="StatusFilter" MinWidth="150" SelectedIndex="0"
-                      SelectionChanged="StatusFilterChanged" AutomationProperties.Name="下載狀態篩選">
-                <ComboBoxItem Content="全部下載" Tag="all" />
-                <ComboBoxItem Content="進行中" Tag="active" />
-                <ComboBoxItem Content="已完成" Tag="completed" />
-                <ComboBoxItem Content="需要處理" Tag="attention" />
+    xmlns:controls="using:Downlism.App.Controls" xmlns:vm="using:Downlism.App.ViewModels" Title="Downlism">
+    <Grid x:Name="Root" RowSpacing="12">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <CommandBar DefaultLabelPosition="Right" IsDynamicOverflowEnabled="True" Background="Transparent" Margin="12,8,12,0">
+            <AppBarButton x:Name="PasteButton" Label="貼上網址" Icon="Paste" Click="PasteClick" AutomationProperties.Name="貼上網址"/>
+            <AppBarButton Label="影片頁面" Icon="Video" Click="PasteMediaClick" AutomationProperties.Name="貼上影片頁面"/>
+            <AppBarButton Label="批次新增" Icon="Add" Click="BatchClick" AutomationProperties.Name="批次新增"/>
+            <AppBarSeparator/>
+            <AppBarButton x:Name="PauseAllButton" Label="全部暫停" Icon="Pause" Click="PauseAllClick"/>
+            <AppBarButton x:Name="ResumeAllButton" Label="全部繼續" Icon="Play" Click="ResumeAllClick"/>
+            <AppBarButton Label="設定" Icon="Setting" Click="SettingsClick" AutomationProperties.Name="設定"/>
+            <CommandBar.SecondaryCommands>
+                <AppBarButton Label="暫停選取" Click="PauseSelectedClick"/>
+                <AppBarButton Label="繼續選取" Click="ResumeSelectedClick"/>
+                <AppBarButton Label="移除選取（保留檔案）" Click="RemoveSelectedClick"/>
+                <AppBarButton Label="複製選取網址" Click="CopySelectedClick"/>
+                <AppBarSeparator/>
+                <AppBarButton Label="匯入網址清單…" Click="ImportLinksClick"/>
+                <AppBarButton Label="匯出目前檢視網址…" Click="ExportLinksClick"/>
+                <AppBarButton Label="瀏覽器擴充功能" Click="ExtensionGuideClick"/>
+            </CommandBar.SecondaryCommands>
+        </CommandBar>
+        <Grid Grid.Row="1" Padding="20,0" ColumnSpacing="10">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/><ColumnDefinition Width="140"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <ComboBox x:Name="StatusFilter" SelectedIndex="0" HorizontalAlignment="Stretch" SelectionChanged="StatusFilterChanged" AutomationProperties.Name="下載狀態篩選">
+                <ComboBoxItem Content="全部下載" Tag="all"/><ComboBoxItem Content="進行中" Tag="active"/>
+                <ComboBoxItem Content="已完成" Tag="completed"/><ComboBoxItem Content="需要處理" Tag="attention"/>
             </ComboBox>
-
-            <TextBlock x:Name="Summary" Grid.Column="1" VerticalAlignment="Center"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                       AutomationProperties.LiveSetting="Polite" />
-
-            <Button x:Name="ClearCompletedButton" Grid.Column="2" Content="清除已完成"
-                    Click="ClearCompletedClick" AutomationProperties.Name="從清單清除已完成下載" />
+            <TextBox x:Name="SearchBox" Grid.Column="1" PlaceholderText="搜尋檔名或來源" TextChanged="SearchChanged" AutomationProperties.Name="搜尋下載"/>
+            <ComboBox x:Name="SortOrder" Grid.Column="2" SelectedIndex="0" SelectionChanged="StatusFilterChanged" HorizontalAlignment="Stretch" AutomationProperties.Name="下載排序">
+                <ComboBoxItem Content="最新加入" Tag="newest"/><ComboBoxItem Content="檔名 A–Z" Tag="name"/><ComboBoxItem Content="來源網站" Tag="source"/>
+            </ComboBox>
+            <Button x:Name="ClearCompletedButton" Grid.Column="3" Content="清除已完成" Click="ClearCompletedClick" ToolTipService.ToolTip="只清除紀錄，不刪除檔案"/>
         </Grid>
-
-        <!-- An empty list is an invitation, not a shrug. -->
-        <StackPanel x:Name="EmptyState" Grid.Row="2" Spacing="10" Padding="40"
-                    VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420">
-            <Image Source="ms-appx:///Assets/Downlism.png" Width="56" Height="56" Opacity="0.9"
-                   HorizontalAlignment="Center" AutomationProperties.Name="Downlism" />
-            <TextBlock x:Name="EmptyTitle" Text="還沒有下載" HorizontalAlignment="Center"
-                       Style="{ThemeResource SubtitleTextBlockStyle}" />
-            <TextBlock x:Name="EmptyDescription" TextWrapping="Wrap" TextAlignment="Center"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                       Text="複製下載連結、影片頁面網址或磁力連結，再按上方的貼上按鈕。裝上 Chrome、Edge 的 Downlism 擴充功能後，網頁上的影片也會被找出來，交給這裡下載。" />
+        <StackPanel x:Name="EmptyState" Grid.Row="2" Spacing="12" Padding="24" MaxWidth="460" VerticalAlignment="Center" HorizontalAlignment="Center">
+            <Image Source="ms-appx:///Assets/Downlism.png" Width="56" Height="56" HorizontalAlignment="Center" AutomationProperties.Name="Downlism"/>
+            <TextBlock x:Name="EmptyTitle" Text="還沒有下載" HorizontalAlignment="Center" Style="{ThemeResource SubtitleTextBlockStyle}"/>
+            <TextBlock x:Name="EmptyDescription" Text="貼上網址開始下載，也可以一次加入多個連結。" TextWrapping="Wrap" TextAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
         </StackPanel>
-
-        <ListView x:Name="Downloads" Grid.Row="2" SelectionMode="None"
-                  Padding="8,0,8,12" ScrollViewer.HorizontalScrollMode="Disabled"
-                  AutomationProperties.Name="下載清單">
-            <ListView.Header>
-                <!-- Labels make the fixed numeric columns self-explanatory without repeating
-                     units in every row. Their widths exactly match the row grid below. -->
-                <Grid Margin="12,0,12,6" ColumnSpacing="16">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="132" />
-                        <ColumnDefinition Width="92" />
-                        <ColumnDefinition Width="104" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Text="檔案" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Grid.Column="1" Text="大小" HorizontalAlignment="Right"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Grid.Column="2" Text="速度" HorizontalAlignment="Right"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Grid.Column="3" Text="剩餘時間" HorizontalAlignment="Right"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                </Grid>
-            </ListView.Header>
-            <ListView.ItemContainerStyle>
-                <Style TargetType="ListViewItem">
-                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                    <Setter Property="Padding" Value="12,10" />
-                    <Setter Property="MinHeight" Value="0" />
-                </Style>
-            </ListView.ItemContainerStyle>
-
+        <ListView x:Name="Downloads" Grid.Row="2" SelectionMode="Extended" SelectionChanged="DownloadSelectionChanged" Padding="8,0,8,12" ScrollViewer.HorizontalScrollMode="Disabled" AutomationProperties.Name="下載清單">
+            <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="12,10"/><Setter Property="MinHeight" Value="0"/></Style></ListView.ItemContainerStyle>
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="vm:DownloadRowViewModel">
-                    <!-- Hairline separators instead of cards: this is a ledger of transfers,
-                         and a grid of bordered boxes would give every row a frame it has not
-                         earned. -->
-                    <Border BorderThickness="0,0,0,1" Padding="0,0,0,12"
-                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
+                    <Border BorderThickness="0,0,0,1" Padding="0,0,0,12" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}">
                         <Grid RowSpacing="9">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                            </Grid.RowDefinitions>
-
-                            <!-- Numbers live in fixed right-aligned columns so a row that
-                                 updates four times a second never shifts under the cursor. -->
-                            <Grid ColumnSpacing="16">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="132" />
-                                    <ColumnDefinition Width="92" />
-                                    <ColumnDefinition Width="104" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-
-                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                    <!-- Two characters, not an icon: "影片" and "BT" say what
-                                         engine is running without a legend to look up. -->
-                                    <Border Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(HasKindLabel)}"
-                                            Background="{ThemeResource ControlAltFillColorSecondaryBrush}"
-                                            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                                            BorderThickness="1" CornerRadius="4" Padding="5,1">
-                                        <TextBlock Text="{x:Bind KindLabel}" FontSize="10.5"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    </Border>
-                                    <TextBlock Text="{x:Bind FileName, Mode=OneWay}" TextTrimming="CharacterEllipsis"
-                                               ToolTipService.ToolTip="{x:Bind FileName, Mode=OneWay}" />
-                                </StackPanel>
-
-                                <TextBlock Grid.Column="1" Text="{x:Bind Size, Mode=OneWay}"
-                                           HorizontalAlignment="Right" VerticalAlignment="Center"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <TextBlock Grid.Column="2" Text="{x:Bind Speed, Mode=OneWay}"
-                                           HorizontalAlignment="Right" VerticalAlignment="Center"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <TextBlock Grid.Column="3" Text="{x:Bind Remaining, Mode=OneWay}"
-                                           HorizontalAlignment="Right" VerticalAlignment="Center"
-                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-
+                            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="124"/><ColumnDefinition Width="88"/><ColumnDefinition Width="88"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <TextBlock Text="{x:Bind KindLabel}" Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(HasKindLabel)}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" VerticalAlignment="Center"/>
+                                    <TextBlock Grid.Column="1" Text="{x:Bind FileName, Mode=OneWay}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind FileName, Mode=OneWay}" VerticalAlignment="Center"/>
+                                </Grid>
+                                <TextBlock Grid.Column="1" Text="{x:Bind Size, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <TextBlock Grid.Column="2" Text="{x:Bind Speed, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                <TextBlock Grid.Column="3" Text="{x:Bind Remaining, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                                 <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="2">
-                                    <Button Click="PauseClick" Tag="{x:Bind Id}"
-                                            Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(CanPause), Mode=OneWay}"
-                                            Style="{StaticResource RowActionButtonStyle}"
-                                            AutomationProperties.Name="暫停" ToolTipService.ToolTip="暫停">
-                                        <FontIcon FontSize="14" Glyph="&#xE769;" />
-                                    </Button>
-                                    <Button Click="ResumeClick" Tag="{x:Bind Id}"
-                                            Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(CanResume), Mode=OneWay}"
-                                            Style="{StaticResource RowActionButtonStyle}"
-                                            AutomationProperties.Name="繼續" ToolTipService.ToolTip="繼續">
-                                        <FontIcon FontSize="14" Glyph="&#xE768;" />
-                                    </Button>
-                                    <Button Click="HashClick" Tag="{x:Bind Id}"
-                                            Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(IsFinished), Mode=OneWay}"
-                                            Style="{StaticResource RowActionButtonStyle}"
-                                            AutomationProperties.Name="計算 SHA-256"
-                                            ToolTipService.ToolTip="計算 SHA-256 並複製">
-                                        <TextBlock Text="SHA" FontSize="11" />
-                                    </Button>
-                                    <Button Click="OpenFolderClick" Tag="{x:Bind Id}"
-                                            Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(IsFinished), Mode=OneWay}"
-                                            Style="{StaticResource RowActionButtonStyle}"
-                                            AutomationProperties.Name="開啟位置" ToolTipService.ToolTip="開啟位置">
-                                        <FontIcon FontSize="14" Glyph="&#xE838;" />
-                                    </Button>
-                                    <Button Click="RemoveClick" Tag="{x:Bind Id}"
-                                            Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(CanCancel), Mode=OneWay}"
-                                            Style="{StaticResource RowActionButtonStyle}"
-                                            AutomationProperties.Name="取消下載"
-                                            ToolTipService.ToolTip="取消下載並從清單移除">
-                                        <TextBlock Text="取消" FontSize="12" />
-                                    </Button>
-                                    <Button Click="RemoveClick" Tag="{x:Bind Id}"
-                                            Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(CanRemove), Mode=OneWay}"
-                                            Style="{StaticResource RowActionButtonStyle}"
-                                            AutomationProperties.Name="移除" ToolTipService.ToolTip="從清單移除">
-                                        <FontIcon FontSize="14" Glyph="&#xE711;" />
-                                    </Button>
+                                    <Button Click="PauseClick" Tag="{x:Bind Id}" Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(CanPause), Mode=OneWay}" Style="{StaticResource RowActionButtonStyle}" AutomationProperties.Name="暫停" ToolTipService.ToolTip="暫停"><FontIcon Glyph="&#xE769;" FontSize="14"/></Button>
+                                    <Button Click="ResumeClick" Tag="{x:Bind Id}" Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(CanResume), Mode=OneWay}" Style="{StaticResource RowActionButtonStyle}" AutomationProperties.Name="繼續" ToolTipService.ToolTip="繼續"><FontIcon Glyph="&#xE768;" FontSize="14"/></Button>
+                                    <Button Click="HashClick" Tag="{x:Bind Id}" Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(IsFinished), Mode=OneWay}" Style="{StaticResource RowActionButtonStyle}" AutomationProperties.Name="計算 SHA-256" ToolTipService.ToolTip="計算並複製 SHA-256"><TextBlock Text="SHA" FontSize="11"/></Button>
+                                    <Button Click="OpenFolderClick" Tag="{x:Bind Id}" Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(IsFinished), Mode=OneWay}" Style="{StaticResource RowActionButtonStyle}" AutomationProperties.Name="開啟位置" ToolTipService.ToolTip="開啟位置"><FontIcon Glyph="&#xE838;" FontSize="14"/></Button>
+                                    <Button Click="RemoveClick" Tag="{x:Bind Id}" Style="{StaticResource RowActionButtonStyle}" AutomationProperties.Name="移除紀錄" ToolTipService.ToolTip="從清單移除，保留檔案"><FontIcon Glyph="&#xE711;" FontSize="14"/></Button>
                                 </StackPanel>
                             </Grid>
-
-                            <controls:SegmentRibbon Grid.Row="1"
-                                                    Segments="{x:Bind Segments, Mode=OneWay}"
-                                                    Fraction="{x:Bind Fraction, Mode=OneWay}"
-                                                    Tone="{x:Bind Tone, Mode=OneWay}"
-                                                    Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(ShowProgress), Mode=OneWay}"
-                                                    HorizontalAlignment="Stretch" />
-
-                            <TextBlock Grid.Row="2" Text="{x:Bind Status, Mode=OneWay}"
-                                       FontSize="12" TextTrimming="CharacterEllipsis"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <controls:SegmentRibbon Grid.Row="1" Segments="{x:Bind Segments, Mode=OneWay}" Fraction="{x:Bind Fraction, Mode=OneWay}" Tone="{x:Bind Tone, Mode=OneWay}" Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(ShowProgress), Mode=OneWay}" HorizontalAlignment="Stretch"/>
+                            <TextBlock Grid.Row="2" Text="{x:Bind Status, Mode=OneWay}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{x:Bind Status, Mode=OneWay}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                         </Grid>
                     </Border>
                 </DataTemplate>
             </ListView.ItemTemplate>
         </ListView>
-
-        <InfoBar x:Name="Notice" Grid.Row="3" IsOpen="False" IsClosable="True" Margin="20,0,20,16" />
+        <TextBlock x:Name="Summary" Grid.Row="3" Margin="20,0,20,4" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+        <InfoBar x:Name="Notice" Grid.Row="4" IsOpen="False" IsClosable="True" Margin="20,0,20,16"/>
     </Grid>
 </Window>
