@@ -54,6 +54,10 @@ public sealed record DownloadRequest
 
     /// <summary>Zero or less means unlimited.</summary>
     public long BytesPerSecond { get; init; }
+
+    public int ReadTimeoutSeconds { get; init; } = 60;
+    public string CategoryRules { get; init; } = "";
+    public string? ExpectedSha256 { get; init; }
 }
 
 /// <summary>
@@ -71,12 +75,14 @@ public sealed record DownloadProgress(
     long? TotalBytes,
     double BytesPerSecond,
     IReadOnlyList<Segment> Segments,
-    string? Note = null)
+    string? Note = null,
+    string? ResolvedFileName = null,
+    string? ResolvedDirectory = null)
 {
     public double? Fraction => TotalBytes is > 0 ? Math.Clamp((double)CompletedBytes / TotalBytes.Value, 0, 1) : null;
 
     public TimeSpan? Remaining => TotalBytes is > 0 && BytesPerSecond > 1
-        ? TimeSpan.FromSeconds((TotalBytes.Value - CompletedBytes) / BytesPerSecond)
+        ? TimeSpan.FromSeconds(Math.Clamp((TotalBytes.Value - CompletedBytes) / BytesPerSecond, 0, TimeSpan.MaxValue.TotalSeconds - 1))
         : null;
 }
 

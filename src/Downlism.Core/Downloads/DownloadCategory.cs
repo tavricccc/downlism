@@ -57,10 +57,13 @@ public sealed record DownloadCategory(string Name, IReadOnlySet<string> Extensio
     /// The folder a file should be saved into. An uncategorised file stays in the root, so an
     /// unfamiliar extension never gets buried somewhere the user would not think to look.
     /// </summary>
-    public static string DirectoryFor(string root, string fileName, bool sortIntoFolders)
+    public static string DirectoryFor(string root, string fileName, bool sortIntoFolders, string? customRules = null)
     {
         if (!sortIntoFolders) return root;
 
+        var extension = Path.GetExtension(fileName).TrimStart('.');
+        var rule = CategoryRule.Parse(customRules).FirstOrDefault(rule => rule.Extensions.Contains(extension));
+        if (rule is not null) return Path.Combine(root, rule.Folder);
         var category = For(fileName);
         return category.Name.Length == 0 ? root : Path.Combine(root, category.Name);
     }
