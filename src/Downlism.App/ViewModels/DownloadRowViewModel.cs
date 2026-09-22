@@ -115,10 +115,10 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
         IsFinished = job.State == DownloadState.Completed;
         CanCancel = IsActive(job.State);
         CanRemove = !CanCancel;
-        ShowProgress = job.State != DownloadState.Completed && progress?.Fraction is not null;
+        ShowProgress = job.State == DownloadState.Completed || progress?.Fraction is not null;
         ProgressText = job.State switch
         {
-            DownloadState.Completed => "已完成",
+            DownloadState.Completed => "100%",
             DownloadState.Paused => progress?.Fraction is { } paused ? $"暫停 {paused:P0}" : "已暫停",
             DownloadState.Failed => "下載失敗",
             DownloadState.Retrying => "等待重試",

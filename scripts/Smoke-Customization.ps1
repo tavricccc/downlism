@@ -122,6 +122,8 @@ try {
  Set-Value (Find-Id $main 'SearchBox') ''
  Start-Sleep -Seconds 3
  Shot '08-completed'
+ $completeBar = Find-Name $main '下載進度' 'ProgressBar'
+ if ($completeBar.Current.IsOffscreen -or $completeBar.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value -ne 1) { throw 'Completed download must retain a visible full progress bar.' }
  $speed = Find-Name $main '平均下載速度' 'Text'
  if (!$speed.Current.HelpText.Contains('平均速度：') -or $speed.Current.HelpText.Contains('平均速度：—')) { throw 'Completed row lost its average speed.' }
  $averageDetails = $speed.Current.HelpText
@@ -135,6 +137,8 @@ try {
  $restored = Window 'Downlism'
  Start-Sleep -Seconds 2
  [void](Find-Name $restored 'sample.bin' 'Text')
+ $completeBar = Find-Name $restored '下載進度' 'ProgressBar'
+ if ($completeBar.Current.IsOffscreen -or $completeBar.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value -ne 1) { throw 'Restored completed download must retain its full progress bar.' }
  $speed = Find-Name $restored '平均下載速度' 'Text'
  if ($speed.Current.HelpText -ne $averageDetails) { throw 'Average speed did not survive restart.' }
  $restored.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
