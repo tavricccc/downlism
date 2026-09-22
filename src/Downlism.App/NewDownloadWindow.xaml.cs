@@ -569,8 +569,6 @@ public sealed partial class NewDownloadWindow : Window
     }
 
     private void CancelClick(object sender, RoutedEventArgs e) => Close();
-    private void AdvancedExpanding(Expander sender, ExpanderExpandingEventArgs args) => DispatcherQueue.TryEnqueue(FitToContent);
-    private void AdvancedCollapsed(Expander sender, ExpanderCollapsedEventArgs args) => FitToContent();
     private void ShowPromptError(string message)
     {
         PromptError.Text = message;
