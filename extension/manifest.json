@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Downlism",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "把 Chrome 與 Edge 的下載交給 Downlism 接手。",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAum6wnKsI6sU98+ohJ7/Qz7v5W6K+Sa0wFhcA8ipcgkcgtNGZJri2X+zCxG0dJxi/c/Z4ag8qF5isu330pJYZ9cYpVl5ZckHWTOP/FVaRYi5pkL5tTO+6lfxGP2Y+9Gm/cyVR+HTgeNpzq/56Cd6JgIA7I0wuH/offyrrnVhg4BMyOAPZNpBZlKf78sR8VAEJQy2fd5bspzrFtkTbLP6Mmj+QKXkpv5B3YbK46mG001fge+LlcPbCQXZQfoMuBdoKa8HZfZtuV8jwmxHdBqh77gd4QGmMifOfhObtyy+rUn5rkZlbH+UWOLwDsitjrqQjX7FYO3AegXh5mlDk5PXMJQIDAQAB",
   "background": {

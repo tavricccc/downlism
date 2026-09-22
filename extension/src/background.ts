@@ -3,8 +3,8 @@
  *
  * Three routes in, because MV3 has no way to block a response.
  *
- *  1. The content script catches download links at the click, so the browser never opens the
- *     connection at all. This is the only route that intercepts rather than cancels.
+ *  1. The content script handles explicit magnet links only. HTTP clicks stay with the page;
+ *     neither a file extension nor a download attribute proves the URL is a direct file.
  *  2. webRequest watches response headers and decides in advance; when chrome.downloads then
  *     reports the download, the cancel is already decided and lands with nothing awaited in
  *     between. This is how Neat Download Manager does it, and it beats deciding inside the
@@ -31,37 +31,26 @@ import {
   type PendingResponse,
 } from "./takeover.js";
 
+import { DEFAULTS, normalizeSettings, permitsAutomatic, type Settings } from "./settings.js";
+
 const HOST_NAME = "com.downlism.host";
 
-interface Settings {
-  enabled: boolean;
-  minimumBytes: number;
-  skipExtensions: string[];
-}
-
-const DEFAULTS: Settings = {
-  enabled: true,
-  // Small files finish before the handover is worth its round trip, and intercepting them
-  // makes ordinary browsing feel like it is fighting the extension.
-  minimumBytes: 1024 * 1024,
-  // Things the browser opens rather than saves; taking these over breaks in-page viewing.
-  skipExtensions: ["pdf", "html", "htm", "txt", "svg", "json", "xml"],
-};
-
 /**
- * The settings as of the last read, kept in memory so the download listeners can decide
- * synchronously. The cache starts from the defaults after every worker restart, so at worst
- * one download immediately after a cold start is judged by the defaults.
+ * Fail open while persisted settings load: a cold worker must not cancel a browser download
+ * using defaults when the person has disabled takeover.
  */
-let cached: Settings = { ...DEFAULTS };
+let cached: Settings = { ...DEFAULTS, enabled: false };
 
 async function refreshSettings(): Promise<Settings> {
-  cached = { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) } as Settings;
+  cached = normalizeSettings(await chrome.storage.local.get(DEFAULTS));
   return cached;
 }
 
-void refreshSettings();
-chrome.storage.onChanged.addListener(() => void refreshSettings());
+const settingsReady = refreshSettings().catch(() => cached);
+chrome.storage.onChanged.addListener(() => {
+  cached = { ...cached, enabled: false };
+  void refreshSettings().catch(() => { /* Keep automatic takeover disabled on storage failure. */ });
+});
 
 /**
  * Header responses are only candidates. Fetch/XHR traffic can carry Content-Disposition too;
@@ -197,12 +186,15 @@ async function completeTakeover(
  */
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
-    if (!cached.enabled || details.method !== "GET") return;
+    if (!permitsAutomatic(cached, details.url, details.initiator) || details.method !== "GET" || details.statusCode < 200 || details.statusCode >= 300) return;
     if (isPageManagedDownload(details.url, details.initiator)) return;
+    // API attachments are not navigations. Never let an XHR response become takeover
+    // evidence for a later download with the same URL.
+    if (details.type === "xmlhttprequest") return;
 
     const disposition = headerValue(details.responseHeaders, "content-disposition");
-    if (!/attachment/i.test(disposition)) return;
-
+    // Remember GET metadata without requiring attachment: chrome.downloads, not a header,
+    // is the authority on whether the browser is saving a file.
     const fileName = nameFromDisposition(disposition);
     const contentType = headerValue(details.responseHeaders, "content-type");
     if (shouldSkip(fileName, contentType)) return;
@@ -229,9 +221,13 @@ chrome.webRequest.onHeadersReceived.addListener(
  */
 chrome.downloads.onCreated.addListener((item) => {
   // Downloads this extension started must never be taken over, or restoring one would loop.
-  if (item.byExtensionId) return;
+  if (item.byExtensionId || !permitsAutomatic(cached, item.url, item.finalUrl, item.referrer)) return;
   // A restored history entry is not a new download.
-  if (item.endTime) return;
+  if (item.endTime || item.state !== "in_progress") return;
+  if (!/^https?:/i.test(item.finalUrl || item.url)) return;
+  if (shouldSkip(item.filename, item.mime)) return;
+  const size = item.fileSize > 0 ? item.fileSize : item.totalBytes;
+  if (size < cached.minimumBytes || size < 0) return;
   if (isPageManagedDownload(item.finalUrl, item.url, item.referrer)) return;
 
   const candidate = takeovers.claimResponse(item.id, [item.finalUrl, item.url]);
@@ -246,7 +242,7 @@ chrome.downloads.onCreated.addListener((item) => {
 // race the header route and hand the same file over a second time.
 chrome.downloads.onErased.addListener((downloadId) => takeovers.release(downloadId));
 chrome.downloads.onChanged.addListener((delta) => {
-  if (delta.state?.current === "complete" || delta.state?.current === "interrupted") {
+  if (delta.state?.current === "complete") {
     takeovers.release(delta.id);
   }
 });
@@ -257,16 +253,22 @@ chrome.downloads.onChanged.addListener((delta) => {
  * runs last.
  */
 chrome.downloads.onDeterminingFilename.addListener((item) => {
-  if (item.byExtensionId || item.endTime) return;
-  if (!cached.enabled) return;
+  if (item.byExtensionId || item.endTime || item.state !== "in_progress") return;
+  if (!permitsAutomatic(cached, item.url, item.finalUrl, item.referrer)) return;
   if (!/^https?:/i.test(item.finalUrl || item.url)) return;
   if (isPageManagedDownload(item.finalUrl, item.url, item.referrer)) return;
-  if (item.fileSize > 0 && item.fileSize < cached.minimumBytes) return;
+  const size = item.fileSize > 0 ? item.fileSize : item.totalBytes;
+  // Unknown-length downloads remain in the browser; there is not enough evidence to apply
+  // the configured threshold. The context menu remains available for an explicit handover.
+  if (size < cached.minimumBytes || size < 0) return;
   if (shouldSkip(item.filename, item.mime)) return;
-  if (!takeovers.claimFallback(item.id)) return;
+  // No observed GET means no automatic takeover: POST responses cannot be replayed by an
+  // external downloader. Manual context-menu downloads remain available.
+  const candidate = takeovers.claimResponse(item.id, [item.finalUrl, item.url]);
+  if (!candidate) return;
 
-  const url = item.finalUrl || item.url;
-  const fileName = item.filename ? item.filename.split(/[\\/]/).pop() : undefined;
+  const url = candidate.url;
+  const fileName = item.filename ? item.filename.split(/[\\/]/).pop() : candidate.fileName;
   const cancellation = chrome.downloads.cancel(item.id);
 
   void completeTakeover(
@@ -334,7 +336,8 @@ async function forgetMedia(tabId: number): Promise<void> {
  */
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
-    if (!cached.enabled || details.tabId < 0) return;
+    if (!cached.sniffMedia || !permitsAutomatic(cached, details.url, details.initiator) || details.tabId < 0) return;
+    if (isPageManagedDownload(details.url, details.initiator)) return;
 
     // A signed, expiring, range-split URL from one of these sites cannot be downloaded on its
     // own. The popup offers the page instead, which is the only thing that works there.
@@ -405,7 +408,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // the download happens in Downlism or is replayed to the browser.
   if (message?.type === "link") {
     void (async () => {
-      if (!cached.enabled) {
+      await settingsReady;
+      if (!cached.enabled || typeof message.url !== "string" || !/^magnet:\?/i.test(message.url)) {
         sendResponse({ handled: false });
         return;
       }
@@ -463,7 +467,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message?.type === "save") {
-    chrome.storage.local.set(message.settings).then(() => sendResponse({ saved: true }));
+    void (async () => {
+      try {
+        const settings = normalizeSettings({ ...cached, ...message.settings }, true);
+        await chrome.storage.local.set(settings);
+        cached = settings;
+        sendResponse({ saved: true });
+      } catch (error) {
+        sendResponse({ saved: false, error: error instanceof Error ? error.message : "設定未儲存" });
+      }
+    })();
     return true;
   }
 

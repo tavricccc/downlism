@@ -12,7 +12,10 @@ test("recognises MEGA pages and encrypted storage hosts as page-managed", () => 
   assert.equal(isPageManagedDownload("https://mega.nz/file/abc"), true);
   assert.equal(isPageManagedDownload("https://gfs270n123.userstorage.mega.co.nz/chunk"), true);
   assert.equal(isPageManagedDownload("https://notmega.nz/file"), false);
-  assert.equal(isPageManagedDownload("blob:https://mega.nz/id"), false);
+  assert.equal(isPageManagedDownload("blob:https://mega.nz/id"), true);
+  assert.equal(isPageManagedDownload("https://mega.io/file/abc"), true);
+  assert.equal(isPageManagedDownload("https://cdn.example/chunk", "https://mega.nz/file/abc"), true);
+  assert.equal(isPageManagedDownload("https://mega.nz.evil.example/file"), false);
 });
 
 test("maps browser-viewable MIME types to skip extensions", () => {
@@ -38,7 +41,7 @@ test("a matching browser download consumes the response once", () => {
 
   assert.deepEqual(state.claimResponse(7, [candidate.url], 2_000), candidate);
   assert.equal(state.claimResponse(7, [candidate.url], 2_000), undefined);
-  assert.equal(state.claimFallback(7), false);
+  assert.equal(state.claimFallback(7, 2_000), false);
   assert.equal(state.pendingCount, 0);
 });
 
@@ -68,6 +71,13 @@ test("pending response storage is bounded during chunk storms", () => {
   assert.equal(state.pendingCount, 3);
   assert.equal(state.claimResponse(1, ["https://mega.nz/chunk/0"], 2_000), undefined);
   assert.equal(state.claimResponse(2, ["https://mega.nz/chunk/9"], 2_000)?.url, "https://mega.nz/chunk/9");
+});
+
+test("cancellation tombstones expire without browser cleanup events", () => {
+  const state = new TakeoverState();
+  assert.equal(state.claimFallback(5, 1_000), true);
+  assert.equal(state.claimFallback(5, 299_000), false);
+  assert.equal(state.claimFallback(5, 301_000), true);
 });
 
 test("released IDs may be used by a later browser event", () => {

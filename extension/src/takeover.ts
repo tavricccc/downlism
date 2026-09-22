@@ -19,7 +19,7 @@ interface TimedResponse {
   seenAt: number;
 }
 
-const PAGE_MANAGED_HOSTS = ["mega.nz", "mega.co.nz"];
+const PAGE_MANAGED_HOSTS = ["mega.nz", "mega.co.nz", "mega.io"];
 
 /**
  * MEGA decrypts and assembles downloads in the page. Its network URLs identify encrypted
@@ -30,7 +30,8 @@ export function isPageManagedDownload(...urls: Array<string | undefined>): boole
     if (!value) return false;
 
     try {
-      const host = new URL(value).hostname.toLowerCase();
+      const parsed = new URL(value);
+      const host = (parsed.protocol === "blob:" ? new URL(parsed.pathname) : parsed).hostname.toLowerCase();
       return PAGE_MANAGED_HOSTS.some((domain) => host === domain || host.endsWith(`.${domain}`));
     } catch {
       return false;
@@ -54,7 +55,9 @@ export function extensionForMime(value: string | undefined): string | undefined 
 
 export class TakeoverState {
   private readonly pending = new Map<string, TimedResponse>();
-  private readonly claimed = new Set<number>();
+  // Keep cancellation tombstones: interrupted is emitted before the filename listener can
+  // finish, and releasing then would let that listener hand the same file over twice.
+  private readonly claimed = new Map<number, number>();
 
   public constructor(
     private readonly lifetimeMs = 30_000,
@@ -78,15 +81,14 @@ export class TakeoverState {
 
   /** Claims a browser download once and consumes matching response metadata, if any. */
   public claimResponse(downloadId: number, urls: readonly string[], now = Date.now()): PendingResponse | undefined {
-    if (this.claimed.has(downloadId)) return undefined;
-
     this.prune(now);
+    if (this.claimed.has(downloadId)) return undefined;
     for (const url of urls) {
       const candidate = this.pending.get(url);
       if (!candidate) continue;
 
       this.pending.delete(url);
-      this.claimed.add(downloadId);
+      this.claimed.set(downloadId, now);
       return candidate.response;
     }
 
@@ -94,9 +96,10 @@ export class TakeoverState {
   }
 
   /** Claims the no-header fallback route, preventing another listener from handling it too. */
-  public claimFallback(downloadId: number): boolean {
+  public claimFallback(downloadId: number, now = Date.now()): boolean {
+    this.prune(now);
     if (this.claimed.has(downloadId)) return false;
-    this.claimed.add(downloadId);
+    this.claimed.set(downloadId, now);
     return true;
   }
 
@@ -109,6 +112,14 @@ export class TakeoverState {
   }
 
   private prune(now: number): void {
+    for (const [id, seenAt] of this.claimed) {
+      if (now - seenAt >= 300_000) this.claimed.delete(id);
+    }
+    while (this.claimed.size > this.maximumPending) {
+      const oldest = this.claimed.keys().next().value;
+      if (oldest === undefined) break;
+      this.claimed.delete(oldest);
+    }
     for (const [url, candidate] of this.pending) {
       if (now - candidate.seenAt < this.lifetimeMs) continue;
       this.pending.delete(url);

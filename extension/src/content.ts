@@ -1,16 +1,10 @@
 /**
- * Catches download links at the click, before the browser issues the request.
- *
- * This is the only place a download can be taken over without the browser fetching any of it.
- * MV3 removed blocking webRequest, so by the time chrome.downloads reports a download the
- * response headers have already arrived and bytes are on their way; cancelling there always
- * wastes part of the file. Stopping the click means Chrome never opens the connection.
- *
- * The cost is that it only sees downloads that start from a link. Everything else still falls
- * through to the cancel-based path in the service worker.
+ * Only intercept explicit magnet links. HTTP links, including download attributes and file
+ * extensions, stay with the page until chrome.downloads confirms an actual download.
+ * A URL ending in .zip can still be an HTML preview or a page-managed encrypted transfer.
  */
 
-import { looksLikeADownload } from "./links.js";
+import { isMagnet } from "./links.js";
 
 /** Marks a click this script generated, so the fallback navigation is not caught again. */
 const REPLAY = "data-downlism-replay";
@@ -51,7 +45,7 @@ document.addEventListener(
     const anchor = (event.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
     if (!anchor || anchor.hasAttribute(REPLAY)) return;
 
-    if (!looksLikeADownload(anchor.href, anchor.hasAttribute("download"), location.href)) return;
+    if (!isMagnet(anchor.href)) return;
 
     let url: URL;
     try {

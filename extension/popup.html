@@ -26,7 +26,7 @@
 
   body {
     margin: 0;
-    width: 288px;
+    width: 352px;
     font: 13px/1.5 "Segoe UI Variable Text", "Microsoft JhengHei UI", system-ui, sans-serif;
     color: var(--ink);
     background: var(--ground);
@@ -179,6 +179,14 @@
 
   #page-video:disabled { cursor: default; opacity: 0.5; }
 
+  details { padding: 12px 16px; }
+  summary { cursor: pointer; font-weight: 600; }
+  details label { display: block; margin-top: 14px; }
+  details p { color: var(--muted); font-size: 12px; margin: 4px 0; }
+  textarea { box-sizing: border-box; width: 100%; min-height: 58px; resize: vertical; font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
+  #save-status { margin: 0; padding: 0 16px; color: var(--down); }
+  ::selection { background: var(--ink); color: var(--ground); }
+  input, textarea { caret-color: var(--ink); }
   :focus-visible {
     outline: 2px solid currentColor;
     outline-offset: 2px;
@@ -206,10 +214,25 @@
       最小檔案
       <p>小於這個大小的檔案交給瀏覽器</p>
     </label>
-    <input type="number" id="minimum" min="0" step="1" aria-describedby="unit" />
+    <input type="number" id="minimum" min="0" max="10240" step="any" aria-describedby="unit" />
   </div>
 </div>
 
-<footer id="unit">最小檔案單位為 MB。設定立即生效。</footer>
+<details>
+  <summary>自訂接手規則</summary>
+  <label for="sniff"><input type="checkbox" id="sniff" /> 偵測頁面上的影片</label>
+  <label for="skip">不接手的副檔名</label>
+  <p id="skip-help">以逗號分隔。建議保留 json、html，避免把網頁或 API 回應當檔案。</p>
+  <textarea id="skip" maxlength="2100" aria-describedby="skip-help"></textarea>
+  <label for="blocked">不自動接手的網站</label>
+  <p id="host-help">每行一個網域，例如 example.com，同時包含子網域。不要填 https:// 或路徑。</p>
+  <textarea id="blocked" maxlength="10000" aria-describedby="host-help" placeholder="example.com"></textarea>
+  <label for="allowed">只自動接手這些網站（選填）</label>
+  <p>留空表示不限網站。排除規則優先；MEGA 永遠由網頁處理。</p>
+  <textarea id="allowed" maxlength="10000" aria-describedby="host-help"></textarea>
+  <p>關閉「接手下載」即為手動模式；右鍵「用 Downlism 下載」仍可使用。POST、blob 和無法確認來源的下載不會自動接手。</p>
+</details>
+<p id="save-status" role="status" aria-live="polite"></p>
+<footer id="unit">最小檔案單位為 MiB，可填小數。設定立即儲存，錯誤會顯示於上方。</footer>
 
 <script src="popup.js"></script>

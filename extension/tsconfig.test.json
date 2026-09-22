@@ -9,6 +9,7 @@
   "include": [
     "src/links.ts",
     "src/media.ts",
-    "src/takeover.ts"
+    "src/takeover.ts",
+    "src/settings.ts"
   ]
 }
