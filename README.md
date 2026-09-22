@@ -2,11 +2,11 @@
 
 <h1 align="center">Downlism</h1>
 
-**0.8.1：** 全面改用 WinUI 3 原生數值進度條，主清單改為單列，顯示並保存平均下載速度。驗證結果與限制見 [0.8.1 說明](docs/release-0.8.1.md)。
+**0.9.0：** 下載中顯示即時速度，完成後改顯示保存的平均速度。驗證結果與限制見 [0.9.0 說明](docs/release-0.9.0.md)。
 <p align="center">多執行緒下載、斷點續傳、影片嗅探與 BitTorrent，並接手 Chrome 與 Edge 的下載。</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.8.1-0A84FF?style=flat-square" alt="Version 0.8.1" />
+  <img src="https://img.shields.io/badge/version-0.9.0-0A84FF?style=flat-square" alt="Version 0.9.0" />
   <img src="https://img.shields.io/badge/Windows_11-26100%2B-0078D4?style=flat-square" alt="Windows 11 build 26100+" />
   <img src="https://img.shields.io/badge/WinUI-3-0078D4?style=flat-square" alt="WinUI 3" />
   <img src="https://img.shields.io/badge/.NET-10-512BD4?style=flat-square" alt=".NET 10" />
@@ -19,7 +19,7 @@ Downlism 把一個檔案切成多段、用多條連線同時下載，中斷後�
 
 ## 介面
 
-主清單每個下載只占一列，依序顯示檔名、大小、進度／狀態、平均速度及操作。下載與安裝介面都使用 WinUI 3 原生 determinate `ProgressBar`；沒有已知總量時不顯示百分比，也不使用循環動畫。來源、剩餘時間及完整錯誤訊息可在滑鼠提示中查看。
+主清單每個下載只占一列，依序顯示檔名、大小、進度／狀態、速度及操作。下載與安裝介面都使用 WinUI 3 原生 determinate `ProgressBar`；沒有已知總量時不顯示百分比，也不使用循環動畫。來源、剩餘時間及完整錯誤訊息可在滑鼠提示中查看。
 
 數字固定在靠右對齊的欄位裡。一列每秒更新四次，若讓數字自由伸縮，整列會在游標下不停抖動。
 
@@ -49,7 +49,7 @@ Downlism 把一個檔案切成多段、用多條連線同時下載，中斷後�
 
 HTTP 引擎負責分段與續傳，影片交給 yt-dlp，BitTorrent 由內建引擎處理。三者共用佇列、重試、暫停續傳、下載紀錄與原生進度條；更換進度條不影響底層並行下載。
 
-平均速度以實際進度樣本間新增的位元組除以傳輸時間，排除暫停、排隊、重試等待及工具下載。完成後保留數值，並隨下載紀錄保存；舊紀錄沒有統計資料時顯示「—」。
+下載中顯示最近 2 秒的即時速度，每 250 毫秒更新；即使連線停傳、沒有新進度回報，速度也會降到 0。完成後改顯示平均速度，以實際進度樣本間新增的位元組除以傳輸時間，排除暫停、排隊、重試等待及工具下載，並隨下載紀錄保存。暫停或等待時顯示「—」；舊完成紀錄沒有平均值時亦然。
 
 **影片嗅探只看得到該看的。** 一個影片頁面會發出數百個請求，把它們全列出來等於沒有列：唯一有用的那一筆會被埋在數千個 `.ts` 片段、縮圖與廣告底下。擴充功能只收 manifest 與夠大的完整檔案，片段一律丟掉。
 
@@ -63,7 +63,7 @@ HTTP 引擎負責分段與續傳，影片交給 yt-dlp，BitTorrent 由內建引
 
 ## 一個安裝程式
 
-`artifacts/installer/Downlism.Setup.exe`，目前版本為 0.8.1，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
+`artifacts/installer/Downlism.Setup.exe`，目前版本為 0.9.0，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
 
 | 裝到機器上的是 | 大小 | 需要什麼 |
 | --- | --- | --- |
