@@ -150,39 +150,12 @@ public sealed class MediaTools(HttpClient client)
     /// <summary>
     /// Downloads one file into the tools folder under exactly the name given.
     /// </summary>
-    /// <remarks>
-    /// The destination is removed first because the engine refuses to overwrite: left in place,
-    /// a failed earlier attempt would be kept and the new copy would land beside it as
-    /// "yt-dlp (2).exe", which nothing ever looks for.
-    /// </remarks>
-    private async Task FetchAsync(
+    private Task FetchAsync(
         string url,
         string fileName,
         IProgress<DownloadProgress>? progress,
         CancellationToken cancellationToken)
-    {
-        var destination = Path.Combine(Directory, fileName);
-        TryDelete(destination);
-
-        var result = await new DownloadEngine(client).RunAsync(
-            new DownloadRequest
-            {
-                Uri = new Uri(url),
-                Directory = Directory,
-                FileName = fileName,
-                SortIntoCategories = false,
-                // One connection, unlike every other transfer in the app. GitHub's release CDN
-                // serves the first range or two and then leaves the rest crawling: measured over
-                // the ffmpeg archive, two of four segments sat at six per cent for the whole
-                // transfer and the connection was eventually reset. One stream finishes sooner
-                // and has nothing to stall.
-                Connections = 1,
-            },
-            progress,
-            cancellationToken).ConfigureAwait(false);
-
-        if (result.Path != destination) File.Move(result.Path, destination, overwrite: true);
-    }
+        => ToolDownload.FetchAsync(client, new Uri(url), Directory, fileName, progress, cancellationToken);
 
     private async Task FetchFfmpegAsync(IProgress<DownloadProgress>? progress, CancellationToken cancellationToken)
     {
