@@ -8,7 +8,7 @@
 
 ## 驗證
 
-206 項 C# 測試通過，涵蓋近期速度、停傳歸零、續傳基準、狀態切換與平均值保存。WinUI 建置無警告或錯誤。
+206 項 C# 測試通過，涵蓋近期速度、停傳歸零、續傳基準、狀態切換與平均值保存。WinUI 建置無警告或錯誤；打包時 34 項擴充功能測試與 TypeScript 型別檢查通過。
 
 隔離 UI 測試已驗證下載中顯示即時速度、完成後改用平均速度、重開後保留平均值與滿格進度條，以及 8 MiB 測試檔案的 SHA-256。證據：`artifacts/customization-smoke/20260922-204312/`。
 
@@ -20,4 +20,8 @@
 pwsh -File scripts/Publish-Installer.ps1 -Version 0.9.0
 ```
 
-安裝檔：`artifacts/installer/Downlism.Setup.exe`。建置紀錄：`artifacts/publish-0.9.0.log`。
+安裝檔：`artifacts/installer/Downlism.Setup.exe`，173,446,373 bytes（165.4 MiB）。建置紀錄：`artifacts/publish-0.9.0.log`。
+
+SHA-256：`DA73B854F2309E5C00BFEBFF6C4EE71ABD19657F219C08C79D7802D5CB6DA8E5`
+
+本機已更新並啟動 0.9.0。安裝後、首次啟動前，設定與下載紀錄的 SHA-256 均與備份相同，安裝檔案亦已核對。備份：`artifacts/pre-upgrade-0.9.0/`；完成截圖：`artifacts/install-0.9.0-complete.png`。
