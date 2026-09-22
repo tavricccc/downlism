@@ -120,7 +120,7 @@
                         <Button.Flyout>
                             <Flyout Placement="TopEdgeAlignedRight">
                                 <StackPanel Spacing="16" Width="380">
-                                    <TextBlock Text="這次下載的設定" FontWeight="SemiBold" />
+                                    <TextBlock Text="這次下載的設定" />
                                     <Grid ColumnSpacing="12">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                                         <NumberBox x:Name="JobConnections" Header="連線數（1–32）" Minimum="1" Maximum="32" SpinButtonPlacementMode="Compact"/>
@@ -172,7 +172,7 @@
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </Border>
 
-                <TextBlock x:Name="ProgressFileName" Grid.Column="1" FontSize="14" FontWeight="SemiBold"
+                <TextBlock x:Name="ProgressFileName" Grid.Column="1" FontSize="14"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             </Grid>
 
@@ -191,7 +191,7 @@
 
                 <TextBlock x:Name="ProgressSize" FontSize="12"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBlock Grid.Column="1" x:Name="ProgressSpeed" FontSize="12" FontWeight="SemiBold" AutomationProperties.Name="平均下載速度"
+                <TextBlock Grid.Column="1" x:Name="ProgressSpeed" FontSize="12" AutomationProperties.Name="平均下載速度"
                            HorizontalAlignment="Center" />
                 <TextBlock Grid.Column="2" x:Name="ProgressRemaining" FontSize="12"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"

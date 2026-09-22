@@ -37,17 +37,17 @@
         </Grid>
         <StackPanel x:Name="EmptyState" Grid.Row="2" Spacing="12" Padding="24" MaxWidth="460" VerticalAlignment="Center" HorizontalAlignment="Center">
             <Image Source="ms-appx:///Assets/Downlism.png" Width="56" Height="56" HorizontalAlignment="Center" AutomationProperties.Name="Downlism"/>
-            <TextBlock x:Name="EmptyTitle" Text="還沒有下載" HorizontalAlignment="Center" Style="{ThemeResource SubtitleTextBlockStyle}" FontWeight="SemiBold"/>
+            <TextBlock x:Name="EmptyTitle" Text="還沒有下載" HorizontalAlignment="Center" Style="{ThemeResource SubtitleTextBlockStyle}" FontWeight="Normal"/>
             <TextBlock x:Name="EmptyDescription" Text="貼上網址開始下載，也可以一次加入多個連結。" TextWrapping="Wrap" TextAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
         </StackPanel>
         <Grid Grid.Row="2" RowSpacing="8">
             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
             <Grid Margin="24,0,24,0" ColumnSpacing="12">
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="140"/><ColumnDefinition Width="152"/><ColumnDefinition Width="104"/><ColumnDefinition Width="100"/></Grid.ColumnDefinitions>
-                <TextBlock Text="檔名" FontWeight="SemiBold"/>
-                <TextBlock Grid.Column="1" Text="下載大小" FontWeight="SemiBold" HorizontalAlignment="Right"/>
-                <TextBlock Grid.Column="2" Text="進度／狀態" FontWeight="SemiBold"/>
-                <TextBlock Grid.Column="3" Text="平均速度" FontWeight="SemiBold" HorizontalAlignment="Right" ToolTipService.ToolTip="下載位元組 ÷ 傳輸時間；不含暫停、排隊與工具下載"/>
+                <TextBlock Text="檔名" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                <TextBlock Grid.Column="1" Text="下載大小" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Right"/>
+                <TextBlock Grid.Column="2" Text="進度／狀態" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                <TextBlock Grid.Column="3" Text="平均速度" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Right" ToolTipService.ToolTip="下載位元組 ÷ 傳輸時間；不含暫停、排隊與工具下載"/>
             </Grid>
         <ListView x:Name="Downloads" Grid.Row="1" SelectionMode="Extended" SelectionChanged="DownloadSelectionChanged" Padding="8,0,8,12" ScrollViewer.HorizontalScrollMode="Disabled" AutomationProperties.Name="下載清單">
             <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="12,6"/><Setter Property="MinHeight" Value="44"/></Style></ListView.ItemContainerStyle>

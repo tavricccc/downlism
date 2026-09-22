@@ -13,7 +13,7 @@
         </Grid.RowDefinitions>
 
         <StackPanel Padding="28,24,28,8" Spacing="6">
-            <TextBlock Text="在瀏覽器裡載入 Downlism" Style="{ThemeResource SubtitleTextBlockStyle}" FontWeight="SemiBold" />
+            <TextBlock Text="在瀏覽器裡載入 Downlism" Style="{ThemeResource SubtitleTextBlockStyle}" FontWeight="Normal" />
             <TextBlock TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                        Text="裝上之後，Chrome 與 Edge 的下載會自動交給 Downlism，網頁上播放的影片也會被找出來。不裝也能用，只是得自己貼網址。" />
         </StackPanel>
@@ -28,13 +28,13 @@
                 </Grid.ColumnDefinitions>
 
                 <Border Style="{StaticResource StepNumberStyle}">
-                    <TextBlock Text="1" FontSize="12.5" FontWeight="SemiBold"
+                    <TextBlock Text="1" FontSize="12.5"
                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
                 </Border>
 
                 <StackPanel Grid.Column="1" Spacing="8">
-                    <TextBlock TextWrapping="Wrap" Text="開啟瀏覽器的擴充功能頁面。" FontWeight="SemiBold" />
+                    <TextBlock TextWrapping="Wrap" Text="開啟瀏覽器的擴充功能頁面。" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button Content="開啟 Chrome" Click="OpenChromeClick" AutomationProperties.Name="開啟 Chrome 擴充功能頁面" />
                         <Button Content="開啟 Edge" Click="OpenEdgeClick" AutomationProperties.Name="開啟 Edge 擴充功能頁面" />
@@ -49,12 +49,12 @@
                 </Grid.ColumnDefinitions>
 
                 <Border Style="{StaticResource StepNumberStyle}">
-                    <TextBlock Text="2" FontSize="12.5" FontWeight="SemiBold"
+                    <TextBlock Text="2" FontSize="12.5"
                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
                 </Border>
                 <TextBlock Grid.Column="1" VerticalAlignment="Center" TextWrapping="Wrap"
-                           Text="打開右上角的「開發人員模式」。" FontWeight="SemiBold" />
+                           Text="打開右上角的「開發人員模式」。" />
             </Grid>
 
             <Grid ColumnSpacing="14">
@@ -64,12 +64,12 @@
                 </Grid.ColumnDefinitions>
 
                 <Border Style="{StaticResource StepNumberStyle}">
-                    <TextBlock Text="3" FontSize="12.5" FontWeight="SemiBold"
+                    <TextBlock Text="3" FontSize="12.5"
                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
                 </Border>
                 <TextBlock Grid.Column="1" VerticalAlignment="Center" TextWrapping="Wrap"
-                           Text="按「載入未封裝項目」。" FontWeight="SemiBold" />
+                           Text="按「載入未封裝項目」。" />
             </Grid>
 
             <Grid ColumnSpacing="14">
@@ -79,13 +79,13 @@
                 </Grid.ColumnDefinitions>
 
                 <Border Style="{StaticResource StepNumberStyle}">
-                    <TextBlock Text="4" FontSize="12.5" FontWeight="SemiBold"
+                    <TextBlock Text="4" FontSize="12.5"
                                HorizontalAlignment="Center" VerticalAlignment="Center"
                                Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
                 </Border>
 
                 <StackPanel Grid.Column="1" Spacing="8">
-                    <TextBlock TextWrapping="Wrap" Text="選這個資料夾：" FontWeight="SemiBold" />
+                    <TextBlock TextWrapping="Wrap" Text="選這個資料夾：" />
 
                     <Grid ColumnSpacing="8">
                         <Grid.ColumnDefinitions>
