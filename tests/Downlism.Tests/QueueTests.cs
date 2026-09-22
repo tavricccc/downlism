@@ -49,6 +49,32 @@ public sealed class QueueTests
         queue.Remove(job.Id);
         Assert.Empty(queue.Jobs);
     }
+    [Fact]
+    public async Task AverageExcludesToolsAndSurvivesCompletion()
+    {
+        using var queue = new DownloadQueue(1, _ => new ReportingEngine());
+        var job = queue.Add(Request);
+        await Until(() => job.State == DownloadState.Completed);
+        Assert.Equal(1000, job.Average.TransferredBytes);
+        Assert.True(job.Average.BytesPerSecond > 0);
+        Assert.Equal(2000, job.Progress!.CompletedBytes);
+        Assert.Equal(1, job.Progress.Fraction);
+    }
+
+    private sealed class ReportingEngine : ITransferEngine
+    {
+        public async Task<DownloadResult> RunAsync(DownloadRequest request, IProgress<DownloadProgress>? progress, CancellationToken token)
+        {
+            progress!.Report(new(0, 100000, 0, [], IsAuxiliary: true));
+            await Task.Delay(10, token);
+            progress.Report(new(100000, 100000, 1000, [], IsAuxiliary: true));
+            progress.Report(new(1000, 2000, 0, [])); // Already resumed bytes.
+            await Task.Delay(10, token);
+            progress.Report(new(2000, 2000, 1000, []));
+            return new(Path.Combine(request.Directory, "test.bin"), 2000, TimeSpan.FromMilliseconds(20));
+        }
+    }
+
     private static async Task Until(Func<bool> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));

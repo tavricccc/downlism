@@ -135,6 +135,9 @@ public sealed class DownloadStoreTests : IDisposable
         Assert.Null(loaded.PageUrl);
         Assert.Equal(MediaOutput.Video, loaded.MediaOutput);
         Assert.Null(loaded.MediaQuality);
+        Assert.Equal(0, loaded.TransferredBytes);
+        Assert.Equal(0, loaded.ActiveSeconds);
+        Assert.Null(loaded.TotalBytes);
     }
 
     [Fact]
@@ -147,6 +150,18 @@ public sealed class DownloadStoreTests : IDisposable
         var loaded = Assert.Single(_store.Load());
         Assert.Equal("Completed", loaded.State);
         Assert.Equal(@"C:\Downloads\b.zip", loaded.Path);
+    }
+
+    [Fact]
+    public void PersistsAverageCountersAndFinalSizeAcrossUpdates()
+    {
+        var download = Sample("average.zip");
+        _store.Save(download);
+        _store.Save(download with { State = "Completed", TransferredBytes = 2048, ActiveSeconds = 2.5, TotalBytes = 4096 });
+        var loaded = Assert.Single(new DownloadStore(Path.Combine(_directory, "downloads.db")).Load());
+        Assert.Equal(2048, loaded.TransferredBytes);
+        Assert.Equal(2.5, loaded.ActiveSeconds);
+        Assert.Equal(4096, loaded.TotalBytes);
     }
 
     [Fact]

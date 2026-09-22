@@ -21,7 +21,10 @@ public sealed record StoredDownload(
     int ReadTimeoutSeconds = 60,
     bool SortIntoCategories = false,
     string CategoryRules = "",
-    string? ExpectedSha256 = null);
+    string? ExpectedSha256 = null,
+    double TransferredBytes = 0,
+    double ActiveSeconds = 0,
+    long? TotalBytes = null);
 
 /// <summary>
 /// The list of downloads, kept across restarts.
@@ -66,7 +69,7 @@ public sealed class DownloadStore
         AddColumnIfMissing(connection, "page_url");
         AddColumnIfMissing(connection, "media_output");
         AddColumnIfMissing(connection, "media_quality");
-        foreach (var column in new[] { "connections", "speed_limit", "read_timeout", "sort_categories", "category_rules", "expected_sha256" })
+        foreach (var column in new[] { "connections", "speed_limit", "read_timeout", "sort_categories", "category_rules", "expected_sha256", "transferred_bytes", "active_seconds", "total_bytes" })
             AddColumnIfMissing(connection, column);
     }
 
@@ -98,15 +101,17 @@ public sealed class DownloadStore
         command.CommandText = """
             INSERT INTO downloads
                 (id, url, directory, file_name, referrer, state, path, created_at, kind, page_url,
-                 media_output, media_quality, connections, speed_limit, read_timeout, sort_categories, category_rules, expected_sha256)
+                 media_output, media_quality, connections, speed_limit, read_timeout, sort_categories, category_rules, expected_sha256,
+                 transferred_bytes, active_seconds, total_bytes)
             VALUES
                 ($id, $url, $directory, $fileName, $referrer, $state, $path, $createdAt, $kind, $pageUrl,
-                 $mediaOutput, $mediaQuality, $connections, $speed, $timeout, $sort, $rules, $sha256)
+                 $mediaOutput, $mediaQuality, $connections, $speed, $timeout, $sort, $rules, $sha256, $transferred, $seconds, $total)
             ON CONFLICT(id) DO UPDATE SET state = excluded.state, path = excluded.path,
                 file_name = excluded.file_name, directory = excluded.directory,
                 connections = excluded.connections, speed_limit = excluded.speed_limit,
                 read_timeout = excluded.read_timeout, sort_categories = excluded.sort_categories,
-                category_rules = excluded.category_rules, expected_sha256 = excluded.expected_sha256;
+                category_rules = excluded.category_rules, expected_sha256 = excluded.expected_sha256,
+                transferred_bytes = excluded.transferred_bytes, active_seconds = excluded.active_seconds, total_bytes = excluded.total_bytes;
             """;
 
         command.Parameters.AddWithValue("$id", download.Id.ToString("N"));
@@ -127,6 +132,9 @@ public sealed class DownloadStore
         command.Parameters.AddWithValue("$sort", download.SortIntoCategories ? 1 : 0);
         command.Parameters.AddWithValue("$rules", download.CategoryRules);
         command.Parameters.AddWithValue("$sha256", (object?)download.ExpectedSha256 ?? DBNull.Value);
+        command.Parameters.AddWithValue("$transferred", download.TransferredBytes);
+        command.Parameters.AddWithValue("$seconds", download.ActiveSeconds);
+        command.Parameters.AddWithValue("$total", (object?)download.TotalBytes ?? DBNull.Value);
         command.ExecuteNonQuery();
     }
 
@@ -146,7 +154,8 @@ public sealed class DownloadStore
         using var command = connection.CreateCommand();
         command.CommandText = """
             SELECT id, url, directory, file_name, referrer, state, path, created_at, kind, page_url,
-                   media_output, media_quality, connections, speed_limit, read_timeout, sort_categories, category_rules, expected_sha256
+                   media_output, media_quality, connections, speed_limit, read_timeout, sort_categories, category_rules, expected_sha256,
+                   transferred_bytes, active_seconds, total_bytes
             FROM downloads WHERE state != 'Completed' OR id IN
                 (SELECT id FROM downloads WHERE state = 'Completed' ORDER BY created_at DESC LIMIT 500)
             ORDER BY created_at DESC;
@@ -180,7 +189,10 @@ public sealed class DownloadStore
                 reader.IsDBNull(14) ? 60 : Math.Clamp(reader.GetInt32(14), 5, 600),
                 !reader.IsDBNull(15) && reader.GetInt32(15) == 1,
                 reader.IsDBNull(16) ? "" : reader.GetString(16),
-                reader.IsDBNull(17) ? null : reader.GetString(17)));
+                reader.IsDBNull(17) ? null : reader.GetString(17),
+                reader.IsDBNull(18) ? 0 : reader.GetDouble(18),
+                reader.IsDBNull(19) ? 0 : reader.GetDouble(19),
+                reader.IsDBNull(20) ? null : reader.GetInt64(20)));
         }
 
         return results;

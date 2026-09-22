@@ -61,8 +61,7 @@ public sealed record DownloadRequest
 }
 
 /// <summary>
-/// A progress sample. <see cref="Segments"/> carries the live per-connection state so the UI
-/// can show where each connection has reached, rather than one averaged bar.
+/// The output requested from the media engine.
 /// </summary>
 public enum MediaOutput
 {
@@ -77,7 +76,8 @@ public sealed record DownloadProgress(
     IReadOnlyList<Segment> Segments,
     string? Note = null,
     string? ResolvedFileName = null,
-    string? ResolvedDirectory = null)
+    string? ResolvedDirectory = null,
+    bool IsAuxiliary = false)
 {
     public double? Fraction => TotalBytes is > 0 ? Math.Clamp((double)CompletedBytes / TotalBytes.Value, 0, 1) : null;
 

@@ -273,7 +273,11 @@ public sealed class MediaEngine(MediaTools tools) : ITransferEngine
             string? note;
             lock (_sync) note = _note;
 
-            progress?.Report(sample with { Note = note });
+            progress?.Report(sample with
+            {
+                Note = note, IsAuxiliary = true,
+                ResolvedFileName = null, ResolvedDirectory = null,
+            });
         }
 
         /// <summary>Parses "downloaded total estimate formatId", any of which may be NA.</summary>
@@ -343,7 +347,11 @@ public sealed class MediaEngine(MediaTools tools) : ITransferEngine
                 }
 
                 completed = _streams.Values.Sum(stream => stream.Downloaded);
-                total = offset;
+                // Unknown stream lengths are not percentages. Keep the bar hidden until
+                // every observed stream has a reported total rather than treating bytes so
+                // far as a completed download.
+                total = _streams.Count > 0 && _streams.Values.All(stream => stream.Total > 0)
+                    ? _streams.Values.Sum(stream => stream.Total) : 0;
                 note = _note;
             }
 

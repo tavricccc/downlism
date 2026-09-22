@@ -110,6 +110,9 @@ public sealed partial class MainWindow : Window
                     ReadTimeoutSeconds = stored.ReadTimeoutSeconds, ExpectedSha256 = stored.ExpectedSha256,
                     Referrer = stored.Referrer,
                 }, stored.State == "Completed" ? DownloadState.Completed : DownloadState.Paused, stored.Path);
+                job.Average.Restore(stored.TransferredBytes, stored.ActiveSeconds);
+                if (job.State == DownloadState.Completed && stored.TotalBytes is { } total)
+                    job.Progress = new DownloadProgress(total, total, 0, []);
                 Track(job, false);
             }
             if (_settings.ResumeOnStartup) App.Queue.ResumeAll();
@@ -195,7 +198,8 @@ public sealed partial class MainWindow : Window
             var r = job.Request;
             _store.Save(new StoredDownload(job.Id, r.Uri.AbsoluteUri, r.Directory, r.FileName ?? "", r.Referrer,
                 job.State.ToString(), job.Path, DateTimeOffset.UtcNow, r.Kind, r.PageUrl, r.MediaOutput, r.MediaQuality,
-                r.Connections, r.BytesPerSecond, r.ReadTimeoutSeconds, r.SortIntoCategories, r.CategoryRules, r.ExpectedSha256));
+                r.Connections, r.BytesPerSecond, r.ReadTimeoutSeconds, r.SortIntoCategories, r.CategoryRules, r.ExpectedSha256,
+                job.Average.TransferredBytes, job.Average.ActiveSeconds, job.Progress?.TotalBytes));
             _persisted[job.Id] = (r, job.State);
         }
         catch (Exception ex) { Show("下載紀錄未儲存：" + ex.Message, InfoBarSeverity.Error); }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Downlism.Core.Downloads;
 using Downlism.Core.Http;
 using Downlism.Core.Media;
@@ -154,6 +155,8 @@ public sealed class DownloadQueue : IDisposable
             var progress = new DirectProgress(sample => Publish(entry, job =>
             {
                 job.Progress = sample;
+                if (sample.IsAuxiliary) job.Average.BreakInterval();
+                else job.Average.Observe(sample.CompletedBytes, Stopwatch.GetElapsedTime(0));
                 if (sample.ResolvedFileName is { } name && sample.ResolvedDirectory is { } folder)
                 {
                     job.FileName = name;
@@ -163,13 +166,14 @@ public sealed class DownloadQueue : IDisposable
             for (var attempt = 1; ; attempt++)
             {
                 token.ThrowIfCancellationRequested();
-                Publish(entry, job => { job.State = DownloadState.Running; job.Attempt = attempt; job.Error = null; });
+                Publish(entry, job => { job.Average.BreakInterval(); job.State = DownloadState.Running; job.Attempt = attempt; job.Error = null; });
                 try
                 {
                     var result = await EngineFor(job.Request).RunAsync(job.Request, progress, token).ConfigureAwait(false);
                     Publish(entry, job =>
                     {
                         job.Path = result.Path;
+                        job.Progress = new DownloadProgress(result.Bytes, result.Bytes, 0, []);
                         job.FileName = System.IO.Path.GetFileName(result.Path.TrimEnd(System.IO.Path.DirectorySeparatorChar));
                         job.Request = job.Request with { FileName = job.FileName, Directory = System.IO.Path.GetDirectoryName(result.Path) ?? job.Request.Directory, SortIntoCategories = false };
                     });
@@ -254,4 +258,5 @@ public sealed class DownloadJob(Guid id, DownloadRequest request)
     public string? Error { get; set; }
     public bool Paused { get; set; }
     public int Attempt { get; set; } = 1;
+    public DownloadAverage Average { get; } = new();
 }
