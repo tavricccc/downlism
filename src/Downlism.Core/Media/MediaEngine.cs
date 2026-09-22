@@ -115,6 +115,8 @@ public sealed class MediaEngine(MediaTools tools) : ITransferEngine
 
         string[] arguments =
         [
+            "--ignore-config",
+            "--js-runtimes", "deno:" + tools.DenoPath,
             "--no-playlist",
             // One line per progress update. The default carriage-return redraw is a single
             // endless line that never raises an OutputDataReceived event.

@@ -26,6 +26,7 @@ namespace Downlism.Core.Media;
 public sealed class MediaTools(HttpClient client)
 {
     private const string YtDlpUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+    private const string DenoUrl = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip";
 
     /// <summary>
     /// yt-dlp's own ffmpeg builds, chosen over the upstream ones because they carry the
@@ -50,7 +51,10 @@ public sealed class MediaTools(HttpClient client)
 
     public string FfmpegPath => Path.Combine(Directory, "ffmpeg.exe");
 
-    public bool IsReady => File.Exists(YtDlpPath) && File.Exists(FfmpegPath);
+    public string DenoPath => Path.Combine(Directory, "deno.exe");
+
+    public bool IsReady => File.Exists(YtDlpPath) && File.Exists(DenoPath)
+        && File.Exists(FfmpegPath) && File.Exists(Path.Combine(Directory, "ffprobe.exe"));
 
     /// <summary>Makes sure yt-dlp is present before probing a page or downloading it.</summary>
     public async Task EnsureYtDlpAsync(
@@ -72,6 +76,14 @@ public sealed class MediaTools(HttpClient client)
             {
                 note?.Invoke("正在更新 yt-dlp");
                 await TryRefreshAsync(progress, cancellationToken).ConfigureAwait(false);
+            }
+
+            // Official yt-dlp.exe bundles EJS, but not the runtime required by YouTube.
+            if (!File.Exists(DenoPath))
+            {
+                note?.Invoke("正在下載 YouTube 解析所需的 Deno 執行環境");
+                await FetchArchiveAsync(DenoUrl, "deno.zip", ["deno.exe"], progress, cancellationToken)
+                    .ConfigureAwait(false);
             }
         }
         finally
@@ -99,10 +111,11 @@ public sealed class MediaTools(HttpClient client)
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!File.Exists(FfmpegPath))
+            if (!File.Exists(FfmpegPath) || !File.Exists(Path.Combine(Directory, "ffprobe.exe")))
             {
                 note?.Invoke("正在下載 ffmpeg（約 180 MB），只需要這一次");
-                await FetchFfmpegAsync(progress, cancellationToken).ConfigureAwait(false);
+                await FetchArchiveAsync(FfmpegUrl, "ffmpeg.zip", ["ffprobe.exe", "ffmpeg.exe"], progress, cancellationToken)
+                    .ConfigureAwait(false);
             }
         }
         finally
@@ -157,24 +170,28 @@ public sealed class MediaTools(HttpClient client)
         CancellationToken cancellationToken)
         => ToolDownload.FetchAsync(client, new Uri(url), Directory, fileName, progress, cancellationToken);
 
-    private async Task FetchFfmpegAsync(IProgress<DownloadProgress>? progress, CancellationToken cancellationToken)
+    private async Task FetchArchiveAsync(string url, string archiveName, string[] executables,
+        IProgress<DownloadProgress>? progress, CancellationToken cancellationToken)
     {
-        var archive = Path.Combine(Directory, "ffmpeg.zip");
+        var archive = Path.Combine(Directory, archiveName);
 
         try
         {
-            await FetchAsync(FfmpegUrl, "ffmpeg.zip", progress, cancellationToken).ConfigureAwait(false);
+            await FetchAsync(url, archiveName, progress, cancellationToken).ConfigureAwait(false);
 
             using var zip = ZipFile.OpenRead(archive);
             // The build nests everything under ffmpeg-.../bin/, and the folder name carries the
             // build date, so the entries are matched on their file name rather than a path.
-            foreach (var wanted in new[] { "ffmpeg.exe", "ffprobe.exe" })
+            foreach (var wanted in executables)
             {
                 var entry = zip.Entries.FirstOrDefault(candidate =>
                     string.Equals(Path.GetFileName(candidate.FullName), wanted, StringComparison.OrdinalIgnoreCase))
-                    ?? throw new InvalidDataException($"ffmpeg 壓縮檔裡找不到 {wanted}。");
+                    ?? throw new InvalidDataException($"{archiveName} 壓縮檔裡找不到 {wanted}。");
 
-                entry.ExtractToFile(Path.Combine(Directory, wanted), overwrite: true);
+                cancellationToken.ThrowIfCancellationRequested();
+                var staged = Path.Combine(Directory, ".staging", wanted);
+                entry.ExtractToFile(staged, overwrite: true);
+                File.Move(staged, Path.Combine(Directory, wanted), overwrite: true);
             }
         }
         finally

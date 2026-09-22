@@ -56,7 +56,7 @@ public sealed class MediaProbe(MediaTools tools)
         return MediaFormats.Parse(json);
     }
 
-    private ProcessStartInfo BuildStartInfo(DownloadRequest request)
+    internal ProcessStartInfo BuildStartInfo(DownloadRequest request)
     {
         var info = new ProcessStartInfo(tools.YtDlpPath)
         {
@@ -68,7 +68,10 @@ public sealed class MediaProbe(MediaTools tools)
             StandardErrorEncoding = Encoding.UTF8,
         };
 
-        foreach (var argument in new[] { "--no-playlist", "--dump-single-json", "--skip-download" })
+        // Metadata discovery must not fail because yt-dlp's default download selection
+        // cannot be satisfied. Keep its configuration independent of the user's CLI setup.
+        foreach (var argument in new[] { "--ignore-config", "--no-playlist", "--dump-single-json",
+            "--skip-download", "--ignore-no-formats-error", "--js-runtimes", "deno:" + tools.DenoPath })
         {
             info.ArgumentList.Add(argument);
         }
