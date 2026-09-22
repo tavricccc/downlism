@@ -431,15 +431,9 @@ public sealed partial class NewDownloadWindow : Window
         ProgressFolder.Text = $"存到：{job.Request.Directory}";
 
         var progress = job.Progress;
-        ProgressRibbon.Segments = progress?.Segments is { Count: > 0 } segs ? segs : null;
-        ProgressRibbon.Fraction = progress?.Fraction ?? 0;
-        ProgressRibbon.Tone = job.State switch
-        {
-            DownloadState.Completed => "completed",
-            DownloadState.Failed or DownloadState.Retrying => "failed",
-            DownloadState.Paused => "paused",
-            _ => "running",
-        };
+        TransferProgress.Value = job.State == DownloadState.Completed ? 1 : progress?.Fraction ?? 0;
+        TransferProgress.Visibility = job.State == DownloadState.Completed || progress?.Fraction is not null
+            ? Visibility.Visible : Visibility.Collapsed;
 
         ProgressSize.Text = progress is null
             ? "—"
@@ -448,9 +442,9 @@ public sealed partial class NewDownloadWindow : Window
                 : DownloadRowViewModel.Bytes(progress.CompletedBytes);
 
         var running = job.State == DownloadState.Running;
-        ProgressSpeed.Text = running && progress is { BytesPerSecond: > 1 }
-            ? $"{DownloadRowViewModel.Bytes((long)progress.BytesPerSecond)}/s"
-            : "";
+        ProgressSpeed.Text = job.Average.BytesPerSecond > 0
+            ? $"平均 {DownloadRowViewModel.Bytes((long)job.Average.BytesPerSecond)}/s"
+            : "平均速度：—";
         ProgressRemaining.Text = running && progress?.Remaining is { } left
             ? DownloadRowViewModel.Duration(left)
             : "";

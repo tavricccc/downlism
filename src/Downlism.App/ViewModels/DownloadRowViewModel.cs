@@ -38,25 +38,25 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
         : job.Request.Uri.Host;
 
     [ObservableProperty]
-    public partial IReadOnlyList<Segment>? Segments { get; set; }
-
-    [ObservableProperty]
     public partial double Fraction { get; set; }
 
     [ObservableProperty]
     public partial string Size { get; set; } = "—";
 
     [ObservableProperty]
-    public partial string Speed { get; set; } = "";
+    public partial string Speed { get; set; } = "—";
+
+    [ObservableProperty]
+    public partial string ProgressText { get; set; } = "等待中";
+
+    [ObservableProperty]
+    public partial string Details { get; set; } = "";
 
     [ObservableProperty]
     public partial string Remaining { get; set; } = "";
 
     [ObservableProperty]
     public partial string Status { get; set; } = "排隊中";
-
-    [ObservableProperty]
-    public partial string Tone { get; set; } = "running";
 
     [ObservableProperty]
     public partial bool CanPause { get; set; }
@@ -81,8 +81,7 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
         var progress = job.Progress;
         FileName = job.FileName;
 
-        Segments = progress?.Segments is { Count: > 0 } segments ? segments : null;
-        Fraction = progress?.Fraction ?? 0;
+        Fraction = job.State == DownloadState.Completed ? 1 : progress?.Fraction ?? 0;
 
         Size = progress is null
             ? "—"
@@ -91,17 +90,8 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
                 : Bytes(progress.CompletedBytes);
 
         var running = job.State == DownloadState.Running;
-        Speed = running && progress is { BytesPerSecond: > 1 } ? $"{Bytes((long)progress.BytesPerSecond)}/s" : "";
+        Speed = job.Average.BytesPerSecond > 0 ? $"{Bytes((long)job.Average.BytesPerSecond)}/s" : "—";
         Remaining = running && progress?.Remaining is { } left ? Duration(left) : "";
-
-        Tone = job.State switch
-        {
-            DownloadState.Completed => "completed",
-            DownloadState.Failed => "failed",
-            DownloadState.Retrying => "failed",
-            DownloadState.Paused => "paused",
-            _ => "running",
-        };
 
         Status = job.State switch
         {
@@ -125,9 +115,19 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
         IsFinished = job.State == DownloadState.Completed;
         CanCancel = IsActive(job.State);
         CanRemove = !CanCancel;
-        // A full green segmented ribbon repeats what "已完成" already says and makes a long
-        // history visually louder than the transfers that still need attention.
-        ShowProgress = job.State != DownloadState.Completed;
+        ShowProgress = job.State != DownloadState.Completed && progress?.Fraction is not null;
+        ProgressText = job.State switch
+        {
+            DownloadState.Completed => "已完成",
+            DownloadState.Paused => progress?.Fraction is { } paused ? $"暫停 {paused:P0}" : "已暫停",
+            DownloadState.Failed => "下載失敗",
+            DownloadState.Retrying => "等待重試",
+            DownloadState.Queued => "排隊中",
+            _ => progress?.Fraction is { } fraction ? $"{fraction:P0}" : "大小未知",
+        };
+        Details = $"{FileName}\n{Origin}\n{Status}"
+            + (Remaining.Length > 0 ? $"\n{Remaining}" : "")
+            + $"\n平均速度：{Speed}（不含暫停、排隊與工具下載）";
     }
 
     private static bool IsActive(DownloadState state) =>
