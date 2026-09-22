@@ -2,11 +2,11 @@
 
 <h1 align="center">Downlism</h1>
 
-**0.8.0：** 精簡下載視窗、改用原生訊息對話框，工具改為並行下載，並自動補裝 YouTube 解析所需的 Deno。驗證結果與限制見 [0.8.0 說明](docs/release-0.8.0.md)。
+**0.8.1：** 全面改用 WinUI 3 原生數值進度條，主清單改為單列，顯示並保存平均下載速度。驗證結果與限制見 [0.8.1 說明](docs/release-0.8.1.md)。
 <p align="center">多執行緒下載、斷點續傳、影片嗅探與 BitTorrent，並接手 Chrome 與 Edge 的下載。</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.8.0-0A84FF?style=flat-square" alt="Version 0.8.0" />
+  <img src="https://img.shields.io/badge/version-0.8.1-0A84FF?style=flat-square" alt="Version 0.8.1" />
   <img src="https://img.shields.io/badge/Windows_11-26100%2B-0078D4?style=flat-square" alt="Windows 11 build 26100+" />
   <img src="https://img.shields.io/badge/WinUI-3-0078D4?style=flat-square" alt="WinUI 3" />
   <img src="https://img.shields.io/badge/.NET-10-512BD4?style=flat-square" alt=".NET 10" />
@@ -19,7 +19,7 @@ Downlism 把一個檔案切成多段、用多條連線同時下載，中斷後�
 
 ## 介面
 
-每一列下載都帶著一條**分段進度條**，顯示這次傳輸真正的分段界線，每一段從自己的起點往前填。這條進度條直接讀取續傳用的 sidecar，所以畫面上看到的就是當機後真正能保留下來的進度。一條平均過的進度條會把下載管理員存在的理由藏起來——哪一條連線卡住了，從平均值上永遠看不出來。
+主清單每個下載只占一列，依序顯示檔名、大小、進度／狀態、平均速度及操作。下載與安裝介面都使用 WinUI 3 原生 determinate `ProgressBar`；沒有已知總量時不顯示百分比，也不使用循環動畫。來源、剩餘時間及完整錯誤訊息可在滑鼠提示中查看。
 
 數字固定在靠右對齊的欄位裡。一列每秒更新四次，若讓數字自由伸縮，整列會在游標下不停抖動。
 
@@ -47,9 +47,9 @@ Downlism 把一個檔案切成多段、用多條連線同時下載，中斷後�
 
 ## 三種引擎，一份介面
 
-下載一個檔案、下載一段影片、下載一個種子，底下幾乎沒有共通之處：分段 HTTP 自己寫位元組範圍，影片交給 yt-dlp，BitTorrent 跑一整個 swarm。但上面的一切是共通的——佇列、同時下載數、重試策略、那一列、暫停與繼續、關機前的保存、完成通知，還有那條分段進度條。
+HTTP 引擎負責分段與續傳，影片交給 yt-dlp，BitTorrent 由內建引擎處理。三者共用佇列、重試、暫停續傳、下載紀錄與原生進度條；更換進度條不影響底層並行下載。
 
-分段進度條在 BitTorrent 上反而最貼切。swarm 是東一塊西一塊把檔案填起來的，這正是這個控制項當初要畫的東西：畫面上被分成十六段，每一段對應真實的片段範圍，依 bitfield 填色。影片則是一段影像流加一段聲音流，兩段依序填滿，最後合併——這也是 yt-dlp 真正在做的事。
+平均速度以實際進度樣本間新增的位元組除以傳輸時間，排除暫停、排隊、重試等待及工具下載。完成後保留數值，並隨下載紀錄保存；舊紀錄沒有統計資料時顯示「—」。
 
 **影片嗅探只看得到該看的。** 一個影片頁面會發出數百個請求，把它們全列出來等於沒有列：唯一有用的那一筆會被埋在數千個 `.ts` 片段、縮圖與廣告底下。擴充功能只收 manifest 與夠大的完整檔案，片段一律丟掉。
 
@@ -63,7 +63,7 @@ Downlism 把一個檔案切成多段、用多條連線同時下載，中斷後�
 
 ## 一個安裝程式
 
-`artifacts/installer/Downlism.Setup.exe`，目前版本為 0.8.0，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
+`artifacts/installer/Downlism.Setup.exe`，目前版本為 0.8.1，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
 
 | 裝到機器上的是 | 大小 | 需要什麼 |
 | --- | --- | --- |
