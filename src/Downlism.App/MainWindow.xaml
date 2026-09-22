@@ -37,7 +37,7 @@
         </Grid>
         <StackPanel x:Name="EmptyState" Grid.Row="2" Spacing="12" Padding="24" MaxWidth="460" VerticalAlignment="Center" HorizontalAlignment="Center">
             <Image Source="ms-appx:///Assets/Downlism.png" Width="56" Height="56" HorizontalAlignment="Center" AutomationProperties.Name="Downlism"/>
-            <TextBlock x:Name="EmptyTitle" Text="還沒有下載" HorizontalAlignment="Center" Style="{ThemeResource SubtitleTextBlockStyle}"/>
+            <TextBlock x:Name="EmptyTitle" Text="還沒有下載" HorizontalAlignment="Center" Style="{ThemeResource SubtitleTextBlockStyle}" FontWeight="SemiBold"/>
             <TextBlock x:Name="EmptyDescription" Text="貼上網址開始下載，也可以一次加入多個連結。" TextWrapping="Wrap" TextAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
         </StackPanel>
         <ListView x:Name="Downloads" Grid.Row="2" SelectionMode="Extended" SelectionChanged="DownloadSelectionChanged" Padding="8,0,8,12" ScrollViewer.HorizontalScrollMode="Disabled" AutomationProperties.Name="下載清單">

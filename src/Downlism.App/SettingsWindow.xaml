@@ -3,13 +3,16 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Downlism 設定">
     <Grid x:Name="Root" Padding="24,16,24,20" RowSpacing="16">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-        <TextBlock Text="設定" Style="{ThemeResource TitleTextBlockStyle}"/>
+        <TextBlock Text="設定" Style="{ThemeResource TitleTextBlockStyle}" FontWeight="SemiBold"/>
         <Pivot Grid.Row="1" x:Name="Sections">
+            <Pivot.HeaderTemplate>
+                <DataTemplate><TextBlock Text="{Binding}" FontWeight="SemiBold"/></DataTemplate>
+            </Pivot.HeaderTemplate>
             <PivotItem Header="下載">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Spacing="20" Padding="0,12,12,16">
                         <StackPanel Spacing="8">
-                            <TextBlock Text="預設下載資料夾"/>
+                            <TextBlock Text="預設下載資料夾" FontWeight="SemiBold"/>
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <TextBox x:Name="Folder" PlaceholderText="留空使用 Downloads" AutomationProperties.Name="預設下載資料夾"/>
