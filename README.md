@@ -2,11 +2,11 @@
 
 <h1 align="center">Downlism</h1>
 
-**0.7.1：** 新增自訂設定、批次操作與下載安全檢查。更新注意事項、驗證結果和未完成項目見 [0.7.1 說明](docs/release-0.7.1.md)。舊版未綁定來源的 HTTP 續傳紀錄可能需要從頭下載。
+**0.8.0：** 精簡下載視窗、改用原生訊息對話框，工具改為並行下載，並自動補裝 YouTube 解析所需的 Deno。驗證結果與限制見 [0.8.0 說明](docs/release-0.8.0.md)。
 <p align="center">多執行緒下載、斷點續傳、影片嗅探與 BitTorrent，並接手 Chrome 與 Edge 的下載。</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.7.1-0A84FF?style=flat-square" alt="Version 0.7.1" />
+  <img src="https://img.shields.io/badge/version-0.8.0-0A84FF?style=flat-square" alt="Version 0.8.0" />
   <img src="https://img.shields.io/badge/Windows_11-26100%2B-0078D4?style=flat-square" alt="Windows 11 build 26100+" />
   <img src="https://img.shields.io/badge/WinUI-3-0078D4?style=flat-square" alt="WinUI 3" />
   <img src="https://img.shields.io/badge/.NET-10-512BD4?style=flat-square" alt=".NET 10" />
@@ -59,11 +59,11 @@ Downlism 把一個檔案切成多段、用多條連線同時下載，中斷後�
 
 **下載前會先讀取來源實際提供的格式，再讓你選影片或 MP3、畫質與音訊位元率。** 清單只列這個來源目前能下載的品質；若格式在按下下載前有變動，yt-dlp 會改抓最接近的可用品質，不會因為原本那一個消失就直接失敗。選擇也會跟著暫停的項目保存，重開程式後再繼續不會改回預設值。
 
-**yt-dlp 與 ffmpeg 不打包進安裝程式，第一次用到時才取得。** 光是 ffmpeg 就比 Downlism 其餘部分加起來還大，而且兩者的授權都得逐版本追蹤。放進 `%LocalAppData%\Downlism\tools`，超過兩週會在背景換新的——取流規則每週在變，一份放著不動的 yt-dlp 一個月後就會在熱門網站上失效。
+**影片工具由 App 在缺少時自動下載，不需要手動安裝。** 解析前補齊 yt-dlp 與 Deno，下載前補齊 FFmpeg／ffprobe，存放於 `%LocalAppData%\Downlism\tools`，不用設定 PATH。工具下載最多使用 8 條分段連線，連線中斷會斷點重試；伺服器不支援 Range 時使用單一串流。yt-dlp 超過兩週會在下次使用前嘗試更新，失敗時保留原本可用的檔案。
 
 ## 一個安裝程式
 
-`artifacts/installer/Downlism.Setup.exe`，0.7.1 建置大小見版本說明，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
+`artifacts/installer/Downlism.Setup.exe`，目前版本為 0.8.0，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
 
 | 裝到機器上的是 | 大小 | 需要什麼 |
 | --- | --- | --- |
