@@ -109,10 +109,6 @@
 
         </StackPanel>
 
-        <!-- Outside the spaced stack: a closed InfoBar collapses to nothing, but the stack's
-             spacing would still reserve a gap above it for a message that is not there. -->
-        <InfoBar x:Name="Notice" Grid.Row="2" IsOpen="False" IsClosable="True" Margin="28,0,28,16" />
-
         <Border Grid.Row="3" BorderThickness="0,1,0,0" Padding="28,14"
                 BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                 Background="{ThemeResource LayerFillColorDefaultBrush}">

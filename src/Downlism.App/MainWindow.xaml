@@ -73,6 +73,5 @@
             </ListView.ItemTemplate>
         </ListView>
         <TextBlock x:Name="Summary" Grid.Row="3" Margin="20,0,20,4" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-        <InfoBar x:Name="Notice" Grid.Row="4" IsOpen="False" IsClosable="True" Margin="20,0,20,16"/>
     </Grid>
 </Window>

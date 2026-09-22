@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Downlism.App.Services;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -24,6 +25,7 @@ namespace Downlism.App;
 public sealed partial class ExtensionGuideWindow : Window
 {
     private const double ContentWidth = 620;
+    private readonly WindowDialogs _dialogs;
 
     /// <summary>Chromium reserves these pages, so a plain shell open is refused; the browser
     /// executable has to be launched with the URL as an argument instead.</summary>
@@ -34,6 +36,7 @@ public sealed partial class ExtensionGuideWindow : Window
     public ExtensionGuideWindow()
     {
         InitializeComponent();
+        _dialogs = new(this, Root);
 
         SystemBackdrop = new Microsoft.UI.Xaml.Media.MicaBackdrop();
         AppWindow.SetIcon("Assets/Downlism.ico");
@@ -153,9 +156,5 @@ public sealed partial class ExtensionGuideWindow : Window
     private void CloseClick(object sender, RoutedEventArgs e) => Close();
 
     private void Show(string message, InfoBarSeverity severity)
-    {
-        Notice.Message = message;
-        Notice.Severity = severity;
-        Notice.IsOpen = true;
-    }
+        => _dialogs.ShowMessage(message, severity);
 }

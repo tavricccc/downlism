@@ -59,6 +59,7 @@ public sealed partial class NewDownloadWindow : Window
     private readonly int _position;
     private readonly CancellationTokenSource _mediaProbeCancellation = new();
     private bool _settled;
+    private readonly WindowDialogs _dialogs;
     private MediaFormats? _mediaFormats;
     private DownloadJob? _job;
 
@@ -68,6 +69,7 @@ public sealed partial class NewDownloadWindow : Window
         Action<bool>? stopAsking = null)
     {
         InitializeComponent();
+        _dialogs = new(this, Root);
 
         _capture = capture;
         _accepted = accepted;
@@ -259,7 +261,8 @@ public sealed partial class NewDownloadWindow : Window
             VideoOption.IsEnabled = true;
             AudioOption.IsEnabled = true;
             FillMediaQualities(SelectedMediaOutput(), _capture.Request.MediaQuality);
-            MediaStatus.Text = $"無法讀取品質：{exception.Message}。下載時會自動選最接近的格式。";
+            MediaStatus.Text = "下載時自動選擇品質";
+            _dialogs.ShowMessage($"無法讀取可用品質：{exception.Message}\n\n仍可嘗試下載，屆時會自動選擇最接近的格式。", InfoBarSeverity.Warning);
         }
 
         MediaType.IsEnabled = true;
@@ -571,9 +574,8 @@ public sealed partial class NewDownloadWindow : Window
     private void CancelClick(object sender, RoutedEventArgs e) => Close();
     private void ShowPromptError(string message)
     {
-        PromptError.Text = message;
-        PromptError.Visibility = Visibility.Visible;
-        FitToContent();
+        Advanced.Flyout.Hide();
+        _dialogs.ShowMessage(message, InfoBarSeverity.Error);
     }
 
     private void Settle(bool? start)

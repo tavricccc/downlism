@@ -11,10 +11,12 @@ public sealed partial class SettingsWindow : Window
     private readonly Action<AppSettings> _apply;
     private readonly LoginStartupService _startup = new();
     private AppSettings _draft;
+    private readonly WindowDialogs _dialogs;
 
     public SettingsWindow(AppSettings settings, Action<AppSettings> apply)
     {
         InitializeComponent();
+        _dialogs = new(this, Root);
         _draft = settings;
         _apply = apply;
         SystemBackdrop = new Microsoft.UI.Xaml.Media.MicaBackdrop();
@@ -101,8 +103,7 @@ public sealed partial class SettingsWindow : Window
     private void DefaultsClick(object sender, RoutedEventArgs e)
     {
         Fill(new AppSettings());
-        Notice.Message = "已載入預設值，按「儲存」才會套用。開機自啟維持原選擇。";
-        Notice.Severity = InfoBarSeverity.Informational; Notice.IsOpen = true;
+        _dialogs.ShowMessage("已載入預設值，按「儲存」才會套用。開機自啟維持原選擇。");
     }
     private async void ExportClick(object sender, RoutedEventArgs e)
     {
@@ -115,7 +116,7 @@ public sealed partial class SettingsWindow : Window
             var file = await picker.PickSaveFileAsync();
             if (file is null) return;
             await File.WriteAllTextAsync(file.Path, settings.ToJson());
-            Notice.Message = "設定已匯出。"; Notice.Severity = InfoBarSeverity.Success; Notice.IsOpen = true;
+            _dialogs.ShowMessage("設定已匯出。", InfoBarSeverity.Success);
         }
         catch (Exception ex) { Error(ex); }
     }
@@ -130,12 +131,12 @@ public sealed partial class SettingsWindow : Window
             if (new FileInfo(file.Path).Length > 65_536) throw new ArgumentException("設定檔過大，請選擇 Downlism 匯出的 JSON。");
             var settings = AppSettings.FromJson(await File.ReadAllTextAsync(file.Path));
             settings.Validate(); Fill(settings);
-            Notice.Message = "已讀取設定，確認後按「儲存」套用。"; Notice.Severity = InfoBarSeverity.Informational; Notice.IsOpen = true;
+            _dialogs.ShowMessage("已讀取設定，確認後按「儲存」套用。");
         }
         catch (Exception ex) { Error(ex); }
     }
     private void Error(Exception ex)
     {
-        Notice.Message = "未儲存：" + ex.Message; Notice.Severity = InfoBarSeverity.Error; Notice.IsOpen = true;
+        _dialogs.ShowMessage("未儲存：" + ex.Message, InfoBarSeverity.Error);
     }
 }

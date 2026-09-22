@@ -24,8 +24,6 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="52" />
@@ -97,7 +95,6 @@
             <CheckBox x:Name="SortIntoCategories" Grid.Row="6" Grid.Column="1" Content="依類型分類存放"
                       AutomationProperties.Name="依類型分類存放" />
 
-            <TextBlock x:Name="PromptError" Grid.Row="8" Grid.ColumnSpan="2" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Assertive"/>
         </Grid>
 
         <!-- A quiet footer strip, separated by a hairline rather than a panel. -->

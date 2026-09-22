@@ -28,10 +28,13 @@ public sealed partial class MainWindow : Window
     private string? _lastClipboardUrl;
     private bool _ready;
     private bool _dialogOpen;
+    private bool _clipboardPromptOpen;
+    private readonly WindowDialogs _dialogs;
 
     public MainWindow()
     {
         InitializeComponent();
+        _dialogs = new(this, Root);
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         Downloads.ItemsSource = _visibleRows;
         SystemBackdrop = new Microsoft.UI.Xaml.Media.MicaBackdrop();
@@ -320,7 +323,7 @@ public sealed partial class MainWindow : Window
                 try { parsed = LinkList.Parse(input.Text); }
                 catch (ArgumentException ex) { error.Text = ex.Message; args.Cancel = true; }
             };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary || parsed is null) return;
+            if (await _dialogs.ShowAsync(dialog) != ContentDialogResult.Primary || parsed is null) return;
             var added = 0;
             var skipped = parsed.Duplicates;
             // Batch additions avoid hundreds of list reconciliation passes.
@@ -375,10 +378,21 @@ public sealed partial class MainWindow : Window
             var text = await ClipboardTextAsync();
             if (text == _lastClipboardUrl || !TransferRouting.TryParse(text, out var uri)) return;
             _lastClipboardUrl = text;
-            var button = new Button { Content = "新增下載" };
-            button.Click += (_, _) => { Notice.IsOpen = false; OpenPrompt(new(NewRequest(uri), 0)); };
-            Show("剪貼簿有下載連結，可確認後加入。", InfoBarSeverity.Informational);
-            Notice.ActionButton = button;
+            if (_clipboardPromptOpen) return;
+            _clipboardPromptOpen = true;
+            try
+            {
+                var dialog = new ContentDialog
+                {
+                    Title = "剪貼簿有下載連結",
+                    Content = "要確認這個連結並新增下載嗎？",
+                    PrimaryButtonText = "新增下載", CloseButtonText = "取消",
+                    DefaultButton = ContentDialogButton.Close,
+                };
+                if (await _dialogs.ShowAsync(dialog) == ContentDialogResult.Primary)
+                    OpenPrompt(new(NewRequest(uri), 0));
+            }
+            finally { _clipboardPromptOpen = false; }
         }
         catch (Exception) { /* Clipboard may be held by another application. */ }
     }
@@ -388,8 +402,11 @@ public sealed partial class MainWindow : Window
         try
         {
             if (!File.Exists(path)) { Show("檔案已移動、刪除，或這個下載是資料夾。", InfoBarSeverity.Warning); return; }
-            Show("正在計算 SHA-256…", InfoBarSeverity.Informational);
-            var hash = await FileHash.ComputeAsync(path, FileHash.Algorithm.Sha256);
+            var control = sender as Control;
+            if (control is not null) control.IsEnabled = false;
+            string hash;
+            try { hash = await FileHash.ComputeAsync(path, FileHash.Algorithm.Sha256); }
+            finally { if (control is not null) control.IsEnabled = true; }
             CopyText(hash); Show("SHA-256 已複製：" + hash, InfoBarSeverity.Success);
         }
         catch (Exception ex) { Show("無法計算雜湊：" + ex.Message, InfoBarSeverity.Error); }
@@ -419,5 +436,5 @@ public sealed partial class MainWindow : Window
         void OnFirstLoad(object sender, RoutedEventArgs e) { Root.Loaded -= OnFirstLoad; _dispatcher.TryEnqueue(DispatcherQueuePriority.Low, ShowExtensionGuide); }
     }
     private void Show(string message, InfoBarSeverity severity)
-    { Notice.ActionButton = null; Notice.Message = message; Notice.Severity = severity; Notice.IsOpen = true; }
+        => _dialogs.ShowMessage(message, severity);
 }
