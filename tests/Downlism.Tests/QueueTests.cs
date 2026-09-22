@@ -61,6 +61,31 @@ public sealed class QueueTests
         Assert.Equal(1, job.Progress.Fraction);
     }
 
+    [Fact]
+    public async Task HeartbeatClearsStaleSpeedWhileEngineIsStalled()
+    {
+        using var queue = new DownloadQueue(1, _ => new StalledEngine());
+        var job = queue.Add(Request);
+        await Until(() => job.Progress?.BytesPerSecond > 0);
+        await Until(() => job.Progress?.BytesPerSecond == 0);
+        Assert.Equal(DownloadState.Running, job.State);
+        queue.Pause(job.Id);
+        await Until(() => job.State == DownloadState.Paused);
+        Assert.Null(job.DisplayBytesPerSecond);
+    }
+
+    private sealed class StalledEngine : ITransferEngine
+    {
+        public async Task<DownloadResult> RunAsync(DownloadRequest request, IProgress<DownloadProgress>? progress, CancellationToken token)
+        {
+            progress!.Report(new(0, 10000, 0, []));
+            await Task.Delay(50, token);
+            progress.Report(new(1000, 10000, 999999, []));
+            await Task.Delay(Timeout.Infinite, token);
+            throw new InvalidOperationException();
+        }
+    }
+
     private sealed class ReportingEngine : ITransferEngine
     {
         public async Task<DownloadResult> RunAsync(DownloadRequest request, IProgress<DownloadProgress>? progress, CancellationToken token)

@@ -147,6 +147,7 @@ public sealed class DownloadQueue : IDisposable
         var token = cancellation.Token;
         var finalState = DownloadState.Failed;
         IDisposable? slot = null;
+        Timer? heartbeat = null;
         try
         {
             Publish(entry);
@@ -154,7 +155,10 @@ public sealed class DownloadQueue : IDisposable
             token.ThrowIfCancellationRequested();
             var progress = new DirectProgress(sample => Publish(entry, job =>
             {
-                job.Progress = sample;
+                if (job.Progress is { } previous && (previous.IsAuxiliary != sample.IsAuxiliary
+                    || sample.IsAuxiliary && previous.ResolvedFileName != sample.ResolvedFileName))
+                    job.Rate.Reset();
+                job.Progress = sample with { BytesPerSecond = job.Rate.Observe(sample.CompletedBytes, Stopwatch.GetElapsedTime(0)) };
                 if (sample.IsAuxiliary) job.Average.BreakInterval();
                 else job.Average.Observe(sample.CompletedBytes, Stopwatch.GetElapsedTime(0));
                 if (sample.ResolvedFileName is { } name && sample.ResolvedDirectory is { } folder)
@@ -163,10 +167,17 @@ public sealed class DownloadQueue : IDisposable
                     job.Request = job.Request with { FileName = name, Directory = folder, SortIntoCategories = false };
                 }
             }));
+            // A stalled connection produces no samples. Keep aging the recent-rate window
+            // so the UI and ETA do not display an old nonzero speed until the read timeout.
+            heartbeat = new Timer(_ => Publish(entry, current =>
+            {
+                if (current.State == DownloadState.Running && current.Progress is { } sample)
+                    current.Progress = sample with { BytesPerSecond = current.Rate.Current(Stopwatch.GetElapsedTime(0)) };
+            }), null, 250, 250);
             for (var attempt = 1; ; attempt++)
             {
                 token.ThrowIfCancellationRequested();
-                Publish(entry, job => { job.Average.BreakInterval(); job.State = DownloadState.Running; job.Attempt = attempt; job.Error = null; });
+                Publish(entry, job => { job.Average.BreakInterval(); job.Rate.Reset(); job.State = DownloadState.Running; job.Attempt = attempt; job.Error = null; });
                 try
                 {
                     var result = await EngineFor(job.Request).RunAsync(job.Request, progress, token).ConfigureAwait(false);
@@ -191,6 +202,7 @@ public sealed class DownloadQueue : IDisposable
         catch (Exception ex) { Publish(entry, job => job.Error = Describe(ex)); }
         finally
         {
+            if (heartbeat is not null) await heartbeat.DisposeAsync().ConfigureAwait(false);
             slot?.Dispose();
             lock (_sync)
             {
@@ -259,4 +271,12 @@ public sealed class DownloadJob(Guid id, DownloadRequest request)
     public bool Paused { get; set; }
     public int Attempt { get; set; } = 1;
     public DownloadAverage Average { get; } = new();
+    internal DownloadRate Rate { get; } = new();
+    public double? DisplayBytesPerSecond => State switch
+    {
+        DownloadState.Running => Progress?.BytesPerSecond ?? 0,
+        DownloadState.Completed when Average.BytesPerSecond > 0 => Average.BytesPerSecond,
+        _ => null,
+    };
+    public string SpeedLabel => State == DownloadState.Completed ? "平均速度" : "即時速度";
 }
