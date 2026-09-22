@@ -1,5 +1,7 @@
 # Downlism 0.8.1
 
+同版介面修訂：移除自訂粗體，主清單欄位名稱改為 12px 次要文字；已完成項目保留滿格原生進度條與 100%，重開後亦然。已重新打包並更新本機安裝，設定與下載紀錄保留。UI 驗證：`artifacts/customization-smoke/20260922-203318/`；更新前備份：`artifacts/pre-ui-refinement-0.8.1/`。
+
 - 主視窗與獨立下載視窗改用 WinUI 3 原生 determinate `ProgressBar`，移除自訂分段繪圖控制項。HTTP 的多連線下載與續傳仍保留。
 - 主清單改為單列：檔名、下載大小、進度／狀態、平均速度、操作。來源、剩餘時間及完整錯誤保留在提示中。
 - 平均速度以進度樣本間實際新增的位元組除以傳輸時間，排除暫停、排隊、重試等待、工具下載，以及續傳前已有的資料。完成後保留，重開 App 也會還原。
@@ -22,9 +24,9 @@
 pwsh -File scripts/Publish-Installer.ps1 -Version 0.8.1
 ```
 
-安裝檔：`artifacts/installer/Downlism.Setup.exe`，173,444,523 bytes（165.4 MiB）。建置紀錄：`artifacts/publish-0.8.1.log`。
+安裝檔：`artifacts/installer/Downlism.Setup.exe`，173,444,446 bytes（165.4 MiB）。建置紀錄：`artifacts/publish-0.8.1.log`。
 
-SHA-256：`8937FD007A7F4AFF3CAC17917EDB33D33EF175DCBB8F06C8C23FD9895A23BD36`
+SHA-256：`58BB81D409616E34495930FF2E78834411DA6D632616355739963E0B6DEF4AE6`
 
 本機已更新並啟動 0.8.1。安裝後、首次啟動前，設定與下載資料庫的 SHA-256 均與備份相同；新版首次啟動會加入上述統計欄位。備份：`artifacts/pre-upgrade-0.8.1/`。
 
