@@ -60,5 +60,6 @@ public sealed record MediaFormats(
         && !string.Equals(codec, "none", StringComparison.OrdinalIgnoreCase);
 
     private static double? Number(JsonElement format, string name) =>
-        format.TryGetProperty(name, out var value) && value.TryGetDouble(out var number) ? number : null;
+        format.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
+        && value.TryGetDouble(out var number) && double.IsFinite(number) ? number : null;
 }

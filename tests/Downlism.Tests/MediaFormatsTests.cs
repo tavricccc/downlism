@@ -41,6 +41,19 @@ public sealed class MediaFormatsTests
     }
 
     [Fact]
+    public void AcceptsNullMetricsFromYoutubeMetadata()
+    {
+        var formats = MediaFormats.Parse("""
+            { "formats": [
+                { "vcodec": "none", "acodec": "opus", "height": null, "abr": null, "tbr": 128 },
+                { "vcodec": "avc1", "acodec": "none", "height": 1080, "abr": null }
+            ] }
+            """);
+        Assert.Equal([1080], formats.VideoHeights);
+        Assert.Equal([128], formats.AudioBitrates);
+    }
+
+    [Fact]
     public void HandlesSourcesWithoutAFormatList()
     {
         var formats = MediaFormats.Parse("{ \"title\": \"unresolved\" }");
