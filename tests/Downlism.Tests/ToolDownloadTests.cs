@@ -28,7 +28,7 @@ public sealed class ToolDownloadTests : IDisposable
         var path = Path.Combine(_directory, "tool.exe");
         await File.WriteAllTextAsync(path, "working tool");
         await using var server = new TestHttpServer(new byte[1024 * 1024])
-        { SupportsRanges = false, TruncateAfterBytes = 4096 };
+        { TruncateAfterBytes = 4096 };
         using var client = new HttpClient();
         await Assert.ThrowsAnyAsync<Exception>(() => ToolDownload.FetchAsync(
             client, server.Uri, _directory, "tool.exe", null, CancellationToken.None));
