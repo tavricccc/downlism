@@ -53,6 +53,18 @@ $process = [Diagnostics.Process]::Start($start)
 try {
  $main = Window 'Downlism'; Start-Sleep -Seconds 2
  Shot '01-main-light'
+ $previousClipboard = Get-Clipboard -Raw
+ try {
+  Set-Clipboard -Value "http://127.0.0.1:$Port/sample.bin"
+  Invoke-Control (Find-Name $main '貼上網址' 'Button')
+  $prompt = Window '新增下載'
+  Shot '01a-download-prompt' '新增下載'
+  Invoke-Control (Find-Name $prompt '這次下載的設定' 'Button')
+  [void](Find-Id $prompt 'JobConnections')
+  [void](Find-Id $prompt 'ExpectedHash')
+  Shot '01b-download-options' '新增下載'
+  $prompt.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
+ } finally { Set-Clipboard -Value $(if ($null -eq $previousClipboard) { '' } else { $previousClipboard }) }
  Invoke-Control (Find-Name $main '設定' 'Button')
  $settings = Window 'Downlism 設定'
  $actualFolder = (Find-Id $settings 'Folder').GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
@@ -74,10 +86,12 @@ try {
  $saved = Get-Content (Join-Path $profile 'settings.json') -Raw | ConvertFrom-Json
  if ($saved.Connections -ne 12 -or $saved.CategoryRules -ne '測試=bin' -or $saved.Theme -ne 'Dark') { throw 'Settings did not round-trip through the real UI.' }
  Shot '04-main-dark'
+ Invoke-Control (Find-Name $main '確定' 'Button')
  Invoke-Control (Find-Name $main '批次新增' 'Button')
  Set-Value (Find-Name $main '批次網址' 'Edit') "http://127.0.0.1:$Port/sample.bin`nhttp://127.0.0.1:$Port/sample.bin"
  Invoke-Control (Find-Name $main '加入清單' 'Button')
  Shot '05-paused-batch'
+ Invoke-Control (Find-Name $main '確定' 'Button')
  Invoke-Control (Find-Name $main '全部繼續' 'Button')
  Start-Sleep -Seconds 1
  Shot '06-downloading'
