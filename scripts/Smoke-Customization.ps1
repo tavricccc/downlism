@@ -24,7 +24,11 @@ function Find-Name($Parent, [string]$Name, [string]$Kind = '') {
  return $found
 }
 function Find-Id($Parent, [string]$Id) {
- $found = $Parent.FindFirst($tree, [System.Windows.Automation.PropertyCondition]::new($ae::AutomationIdProperty, $Id))
+ $found = $null
+ for ($i=0; $i -lt 30 -and !$found; $i++) {
+  $found = $Parent.FindFirst($tree, [System.Windows.Automation.PropertyCondition]::new($ae::AutomationIdProperty, $Id))
+  if (!$found) { Start-Sleep -Milliseconds 100 }
+ }
  if (!$found) { throw "Control not found: #$Id" }; return $found
 }
 function Invoke-Control($Element) { $Element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); Start-Sleep -Milliseconds 400 }
@@ -95,6 +99,11 @@ try {
  Invoke-Control (Find-Name $main '全部繼續' 'Button')
  Start-Sleep -Seconds 1
  Shot '06-downloading'
+ $bar = Find-Name $main '下載進度' 'ProgressBar'
+ $range = $bar.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current
+ if ($range.Maximum -ne 1 -or $range.Value -le 0 -or $range.Value -ge 1) { throw 'Expected native determinate progress between 0 and 1.' }
+ $speed = Find-Name $main '平均下載速度' 'Text'
+ if (!$speed.Current.HelpText.Contains('平均速度：') -or $speed.Current.HelpText.Contains('平均速度：—')) { throw 'Average speed was not populated.' }
  Invoke-Control (Find-Name $main '全部暫停' 'Button')
  Start-Sleep -Seconds 1
  Shot '07-paused'
@@ -113,6 +122,9 @@ try {
  Set-Value (Find-Id $main 'SearchBox') ''
  Start-Sleep -Seconds 3
  Shot '08-completed'
+ $speed = Find-Name $main '平均下載速度' 'Text'
+ if (!$speed.Current.HelpText.Contains('平均速度：') -or $speed.Current.HelpText.Contains('平均速度：—')) { throw 'Completed row lost its average speed.' }
+ $averageDetails = $speed.Current.HelpText
  $process.Refresh()
  $metrics = [ordered]@{ ProcessId=$process.Id; WorkingSetMiB=[math]::Round($process.WorkingSet64/1MB,1); PrivateMiB=[math]::Round($process.PrivateMemorySize64/1MB,1); DownloadSha256=$actual; Profile=$profile; Result='passed' }
  $metrics | ConvertTo-Json | Set-Content (Join-Path $OutputDirectory 'result.json') -Encoding utf8
@@ -123,6 +135,8 @@ try {
  $restored = Window 'Downlism'
  Start-Sleep -Seconds 2
  [void](Find-Name $restored 'sample.bin' 'Text')
+ $speed = Find-Name $restored '平均下載速度' 'Text'
+ if ($speed.Current.HelpText -ne $averageDetails) { throw 'Average speed did not survive restart.' }
  $restored.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
  if (!$process.WaitForExit(10000)) { throw 'Restored app did not exit.' }
  Write-Output 'Restart restored the completed download successfully.'
