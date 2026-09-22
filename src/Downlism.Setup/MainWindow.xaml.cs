@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Downlism.Core.Installation;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -101,17 +102,27 @@ public sealed partial class MainWindow : Window
         }
         _busy = true;
         ActionButton.IsEnabled = CloseButton.IsEnabled = InstallPath.IsEnabled = DesktopShortcut.IsEnabled = KeepData.IsEnabled = false;
-        Progress.Visibility = Visibility.Visible;
+        ProgressPanel.Visibility = Visibility.Visible;
+        Progress.Visibility = Visibility.Collapsed;
+        Progress.Value = 0;
+        ProgressLabel.Text = "正在準備，請稍候";
         Status.IsOpen = false;
         var target = InstallPath.Text;
         var desktop = DesktopShortcut.IsChecked == true;
         var keepData = KeepData.IsChecked == true;
+        var progress = new Progress<InstallationProgress>(sample =>
+        {
+            if (!_busy) return;
+            Progress.Visibility = sample.Total > 0 ? Visibility.Visible : Visibility.Collapsed;
+            Progress.Value = sample.Fraction;
+            ProgressLabel.Text = $"{sample.Phase}：{sample.Completed} / {sample.Total}";
+        });
         try
         {
             await Task.Run(() =>
             {
-                if (_uninstall) InstallationService.Uninstall(keepData);
-                else InstallationService.Install(target, desktop);
+                if (_uninstall) InstallationService.Uninstall(keepData, progress);
+                else InstallationService.Install(target, desktop, progress);
             });
             _complete = true;
             Heading.Text = _uninstall ? "已解除安裝" : _updating ? "更新完成" : "安裝完成";
@@ -130,7 +141,7 @@ public sealed partial class MainWindow : Window
         finally
         {
             _busy = false;
-            Progress.Visibility = Visibility.Collapsed;
+            ProgressPanel.Visibility = Visibility.Collapsed;
             ActionButton.IsEnabled = CloseButton.IsEnabled = true;
             InstallPath.IsEnabled = DesktopShortcut.IsEnabled = KeepData.IsEnabled = !_complete;
         }

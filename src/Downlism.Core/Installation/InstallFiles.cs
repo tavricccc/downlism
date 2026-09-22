@@ -91,13 +91,19 @@ public static class InstallFiles
         return manifest;
     }
 
-    public static void RemoveOwnedFiles(string root)
+    public static void RemoveOwnedFiles(string root, IProgress<InstallationProgress>? progress = null)
     {
         root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         var manifest = ReadManifest(root);
         // Resolve every path before deletion; never follow reparse points.
         var paths = manifest.Files.Keys.Select(name => Resolve(root, name)).ToArray();
-        foreach (var path in paths) File.Delete(path);
+        var removed = 0;
+        progress?.Report(new("移除程式檔案", 0, paths.Length));
+        foreach (var path in paths)
+        {
+            File.Delete(path);
+            progress?.Report(new("移除程式檔案", ++removed, paths.Length));
+        }
         var uninstallExe = Path.Combine(root, "Uninstall.exe");
         if (File.Exists(uninstallExe)) try { File.Delete(uninstallExe); } catch { }
         File.Delete(Resolve(root, ManifestName));
@@ -115,20 +121,24 @@ public static class InstallFiles
         if (Directory.Exists(root) && !Directory.EnumerateFileSystemEntries(root).Any()) Directory.Delete(root);
     }
 
-    public static void RemoveInstallation(string root, bool keepData)
+    public static void RemoveInstallation(string root, bool keepData, IProgress<InstallationProgress>? progress = null)
     {
-        if (keepData) { RemoveOwnedFiles(root); return; }
+        if (keepData) { RemoveOwnedFiles(root, progress); return; }
         root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         ReadManifest(root);
         RejectReparseTree(root);
         var manifestPath = Path.Combine(root, ManifestName);
         // Retain the ownership record until every other file has been removed, so a
         // locked file does not make a partially removed installation impossible to retry.
-        foreach (var file in Directory.GetFiles(root, "*", SearchOption.AllDirectories))
+        var files = Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+            .Where(file => !string.Equals(file, manifestPath, StringComparison.OrdinalIgnoreCase)).ToArray();
+        var removed = 0;
+        progress?.Report(new("移除程式檔案", 0, files.Length));
+        foreach (var file in files)
         {
-            if (string.Equals(file, manifestPath, StringComparison.OrdinalIgnoreCase)) continue;
             File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
             File.Delete(file);
+            progress?.Report(new("移除程式檔案", ++removed, files.Length));
         }
         foreach (var directory in Directory.GetDirectories(root, "*", SearchOption.AllDirectories).OrderByDescending(x => x.Length))
             Directory.Delete(directory);

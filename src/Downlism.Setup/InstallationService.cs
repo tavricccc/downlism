@@ -51,7 +51,7 @@ public sealed class InstallationService
         }
     }
 
-    public static void Install(string target, bool desktop)
+    public static void Install(string target, bool desktop, IProgress<InstallationProgress>? progress = null)
     {
         target = ValidateTarget(target);
         var updating = InstalledPath is not null;
@@ -90,7 +90,7 @@ public sealed class InstallationService
                 // Point Chrome and Edge at the host that ships with this installation, so the
                 // browser extension can hand downloads over as soon as it is loaded.
                 BrowserRegistration.Register(target);
-            });
+            }, progress);
         }
         catch
         {
@@ -118,7 +118,7 @@ public sealed class InstallationService
         catch (UnauthorizedAccessException) { }
     }
 
-    public static void Uninstall(bool keepData)
+    public static void Uninstall(bool keepData, IProgress<InstallationProgress>? progress = null)
     {
         var target = InstalledPath ?? throw new IOException("找不到 Downlism 安裝紀錄。");
         target = Path.TrimEndingDirectorySeparator(Path.GetFullPath(target));
@@ -135,7 +135,7 @@ public sealed class InstallationService
         // Remove the browser registrations before the files, so no browser is left pointing at
         // a host manifest that no longer exists.
         BrowserRegistration.Unregister();
-        InstallFiles.RemoveInstallation(target, keepData);
+        InstallFiles.RemoveInstallation(target, keepData, progress);
         RemoveMatchingShortcut(StartShortcut, target);
         using (var key = Registry.CurrentUser.OpenSubKey(UninstallKey))
             if (key?.GetValue("DesktopShortcut") is int value && value == 1) RemoveMatchingShortcut(DesktopLink, target);

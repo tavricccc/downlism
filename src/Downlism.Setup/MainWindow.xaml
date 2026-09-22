@@ -14,7 +14,10 @@
     <CheckBox FontFamily="Microsoft JhengHei UI" x:Name="DesktopShortcut" Content="建立桌面捷徑" IsChecked="False" />
     <CheckBox FontFamily="Microsoft JhengHei UI" x:Name="KeepData" Content="保留設定與使用紀錄" IsChecked="False" Visibility="Collapsed" />
     <TextBlock FontFamily="Microsoft JhengHei UI" x:Name="Details" Text="開始功能表捷徑會自動建立，並同時登記 Chrome 與 Edge 的下載接手服務。要讓瀏覽器真的交出下載，還需要載入 extension 資料夾裡的擴充功能。" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-    <ProgressBar x:Name="Progress" Visibility="Collapsed" IsIndeterminate="True" />
+    <StackPanel x:Name="ProgressPanel" Visibility="Collapsed" Spacing="8">
+     <TextBlock x:Name="ProgressLabel" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+     <ProgressBar x:Name="Progress" Minimum="0" Maximum="1" IsIndeterminate="False" AutomationProperties.Name="目前安裝階段進度" />
+    </StackPanel>
     <InfoBar x:Name="Status" IsOpen="False" IsClosable="False" />
    </StackPanel>
   </ScrollViewer>

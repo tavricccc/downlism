@@ -4,12 +4,17 @@ namespace Downlism.Core.Installation;
 
 public static class InstallationUpdate
 {
-    public static InstallManifest VerifySource(string source)
+    public static InstallManifest VerifySource(string source, IProgress<InstallationProgress>? progress = null)
     {
         var manifest = InstallFiles.ReadManifest(source);
+        var verified = 0;
+        progress?.Report(new("校驗安裝檔案", 0, manifest.Files.Count));
         foreach (var (name, hash) in manifest.Files)
+        {
             if (!Matches(InstallFiles.Resolve(source, name), hash))
                 throw new InvalidDataException($"安裝檔案校驗失敗：{name}");
+            progress?.Report(new("校驗安裝檔案", ++verified, manifest.Files.Count));
+        }
         // Microsoft.WinUI.dll rather than Microsoft.UI.Xaml.dll: the managed projection is present
         // in both layouts, while the native XAML binary only exists in the standalone one, where
         // the whole Windows App SDK is copied into the installation. Naming the native binary
@@ -29,7 +34,8 @@ public static class InstallationUpdate
     // being part of the installation. Leaving them would be worse than wasteful — a
     // Microsoft.UI.Xaml.dll beside the executable wins over the framework package, so the app
     // would keep loading the old copy and quietly ignore the shared one.
-    public static void Apply(string source, string target, Action<InstallManifest> register)
+    public static void Apply(string source, string target, Action<InstallManifest> register,
+        IProgress<InstallationProgress>? progress = null)
     {
         source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(source));
         target = Path.TrimEndingDirectorySeparator(Path.GetFullPath(target));
@@ -37,7 +43,7 @@ public static class InstallationUpdate
             || source.StartsWith(target + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
             || target.StartsWith(source + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new IOException("請從安裝位置以外的發布資料夾執行安裝程式。");
-        var next = VerifySource(source);
+        var next = VerifySource(source, progress);
         InstallFiles.RejectReparsePoints(target);
         var previous = File.Exists(Path.Combine(target, InstallFiles.ManifestName)) ? InstallFiles.ReadManifest(target) : null;
         if (previous is null && Directory.Exists(target) && Directory.EnumerateFileSystemEntries(target).Any())
@@ -65,6 +71,8 @@ public static class InstallationUpdate
         var rollbackFailed = false;
         try
         {
+            var stagedCount = 0;
+            progress?.Report(new("準備更新檔案", 0, changed.Count + 1));
             foreach (var name in changed.Append(InstallFiles.ManifestName))
             {
                 var destination = InstallFiles.Resolve(staged, name);
@@ -72,9 +80,13 @@ public static class InstallationUpdate
                 File.Copy(InstallFiles.Resolve(source, name), destination);
                 if (next.Files.TryGetValue(name, out var hash) && !Matches(destination, hash))
                     throw new IOException($"安裝來源在複製時變更：{name}");
+                progress?.Report(new("準備更新檔案", ++stagedCount, changed.Count + 1));
             }
             Directory.CreateDirectory(target);
-            foreach (var name in changed.Concat(removed).Append(InstallFiles.ManifestName).Distinct(StringComparer.OrdinalIgnoreCase))
+            var operations = changed.Concat(removed).Append(InstallFiles.ManifestName).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var applied = 0;
+            progress?.Report(new("套用更新", 0, operations.Length + 1));
+            foreach (var name in operations)
             {
                 var destination = InstallFiles.Resolve(target, name);
                 if (File.Exists(destination))
@@ -91,8 +103,10 @@ public static class InstallationUpdate
                     File.Move(replacement, destination);
                     written.Add(name);
                 }
+                progress?.Report(new("套用更新", ++applied, operations.Length + 1));
             }
             register(next);
+            progress?.Report(new("套用更新", operations.Length + 1, operations.Length + 1));
         }
         catch (Exception failure)
         {
