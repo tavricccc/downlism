@@ -102,8 +102,8 @@ try {
  $bar = Find-Name $main '下載進度' 'ProgressBar'
  $range = $bar.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current
  if ($range.Maximum -ne 1 -or $range.Value -le 0 -or $range.Value -ge 1) { throw 'Expected native determinate progress between 0 and 1.' }
- $speed = Find-Name $main '平均下載速度' 'Text'
- if (!$speed.Current.HelpText.Contains('平均速度：') -or $speed.Current.HelpText.Contains('平均速度：—')) { throw 'Average speed was not populated.' }
+ $speed = Find-Name $main '下載速度' 'Text'
+ if (!$speed.Current.HelpText.Contains('即時速度：') -or $speed.Current.HelpText.Contains('即時速度：—')) { throw 'Live speed was not populated.' }
  Invoke-Control (Find-Name $main '全部暫停' 'Button')
  Start-Sleep -Seconds 1
  Shot '07-paused'
@@ -124,7 +124,7 @@ try {
  Shot '08-completed'
  $completeBar = Find-Name $main '下載進度' 'ProgressBar'
  if ($completeBar.Current.IsOffscreen -or $completeBar.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value -ne 1) { throw 'Completed download must retain a visible full progress bar.' }
- $speed = Find-Name $main '平均下載速度' 'Text'
+ $speed = Find-Name $main '下載速度' 'Text'
  if (!$speed.Current.HelpText.Contains('平均速度：') -or $speed.Current.HelpText.Contains('平均速度：—')) { throw 'Completed row lost its average speed.' }
  $averageDetails = $speed.Current.HelpText
  $process.Refresh()
@@ -139,7 +139,7 @@ try {
  [void](Find-Name $restored 'sample.bin' 'Text')
  $completeBar = Find-Name $restored '下載進度' 'ProgressBar'
  if ($completeBar.Current.IsOffscreen -or $completeBar.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value -ne 1) { throw 'Restored completed download must retain its full progress bar.' }
- $speed = Find-Name $restored '平均下載速度' 'Text'
+ $speed = Find-Name $restored '下載速度' 'Text'
  if ($speed.Current.HelpText -ne $averageDetails) { throw 'Average speed did not survive restart.' }
  $restored.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close()
  if (!$process.WaitForExit(10000)) { throw 'Restored app did not exit.' }

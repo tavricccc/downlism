@@ -47,7 +47,7 @@
                 <TextBlock Text="檔名" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                 <TextBlock Grid.Column="1" Text="下載大小" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Right"/>
                 <TextBlock Grid.Column="2" Text="進度／狀態" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                <TextBlock Grid.Column="3" Text="平均速度" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Right" ToolTipService.ToolTip="下載位元組 ÷ 傳輸時間；不含暫停、排隊與工具下載"/>
+                <TextBlock Grid.Column="3" Text="速度" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Right" ToolTipService.ToolTip="下載中顯示即時速度；完成後顯示平均速度"/>
             </Grid>
         <ListView x:Name="Downloads" Grid.Row="1" SelectionMode="Extended" SelectionChanged="DownloadSelectionChanged" Padding="8,0,8,12" ScrollViewer.HorizontalScrollMode="Disabled" AutomationProperties.Name="下載清單">
             <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="12,6"/><Setter Property="MinHeight" Value="44"/></Style></ListView.ItemContainerStyle>
@@ -68,7 +68,7 @@
                                                  VerticalAlignment="Center" AutomationProperties.Name="下載進度"/>
                                     <TextBlock Grid.Column="1" Text="{x:Bind ProgressText, Mode=OneWay}" FontSize="12" VerticalAlignment="Center"/>
                                 </Grid>
-                                <TextBlock Grid.Column="3" Text="{x:Bind Speed, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Center" AutomationProperties.Name="平均下載速度" AutomationProperties.HelpText="{x:Bind Details, Mode=OneWay}"/>
+                                <TextBlock Grid.Column="3" Text="{x:Bind Speed, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Center" AutomationProperties.Name="下載速度" AutomationProperties.HelpText="{x:Bind Details, Mode=OneWay}"/>
                                 <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="2">
                                     <Button Click="PauseClick" Tag="{x:Bind Id}" Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(CanPause), Mode=OneWay}" Style="{StaticResource RowActionButtonStyle}" AutomationProperties.Name="暫停" ToolTipService.ToolTip="暫停"><FontIcon Glyph="&#xE769;" FontSize="14"/></Button>
                                     <Button Click="ResumeClick" Tag="{x:Bind Id}" Visibility="{x:Bind vm:DownloadRowViewModel.ShowIf(CanResume), Mode=OneWay}" Style="{StaticResource RowActionButtonStyle}" AutomationProperties.Name="繼續" ToolTipService.ToolTip="繼續"><FontIcon Glyph="&#xE768;" FontSize="14"/></Button>

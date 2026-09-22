@@ -442,9 +442,7 @@ public sealed partial class NewDownloadWindow : Window
                 : DownloadRowViewModel.Bytes(progress.CompletedBytes);
 
         var running = job.State == DownloadState.Running;
-        ProgressSpeed.Text = job.Average.BytesPerSecond > 0
-            ? $"平均 {DownloadRowViewModel.Bytes((long)job.Average.BytesPerSecond)}/s"
-            : "平均速度：—";
+        ProgressSpeed.Text = $"{job.SpeedLabel}：{DownloadRowViewModel.SpeedFor(job)}";
         ProgressRemaining.Text = running && progress?.Remaining is { } left
             ? DownloadRowViewModel.Duration(left)
             : "";

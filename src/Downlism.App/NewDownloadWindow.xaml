@@ -191,7 +191,7 @@
 
                 <TextBlock x:Name="ProgressSize" FontSize="12"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                <TextBlock Grid.Column="1" x:Name="ProgressSpeed" FontSize="12" AutomationProperties.Name="平均下載速度"
+                <TextBlock Grid.Column="1" x:Name="ProgressSpeed" FontSize="12" AutomationProperties.Name="下載速度"
                            HorizontalAlignment="Center" />
                 <TextBlock Grid.Column="2" x:Name="ProgressRemaining" FontSize="12"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"

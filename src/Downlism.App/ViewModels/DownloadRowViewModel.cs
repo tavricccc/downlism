@@ -90,7 +90,7 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
                 : Bytes(progress.CompletedBytes);
 
         var running = job.State == DownloadState.Running;
-        Speed = job.Average.BytesPerSecond > 0 ? $"{Bytes((long)job.Average.BytesPerSecond)}/s" : "—";
+        Speed = SpeedFor(job);
         Remaining = running && progress?.Remaining is { } left ? Duration(left) : "";
 
         Status = job.State switch
@@ -127,8 +127,12 @@ public sealed partial class DownloadRowViewModel(DownloadJob job) : ObservableOb
         };
         Details = $"{FileName}\n{Origin}\n{Status}"
             + (Remaining.Length > 0 ? $"\n{Remaining}" : "")
-            + $"\n平均速度：{Speed}（不含暫停、排隊與工具下載）";
+            + $"\n{job.SpeedLabel}：{Speed}"
+            + (job.State == DownloadState.Completed ? "（不含暫停、排隊與工具下載）" : "（最近 2 秒）");
     }
+
+    public static string SpeedFor(DownloadJob job) => job.DisplayBytesPerSecond is { } rate
+        ? $"{Bytes((long)rate)}/s" : "—";
 
     private static bool IsActive(DownloadState state) =>
         state is DownloadState.Queued or DownloadState.Running or DownloadState.Retrying;
