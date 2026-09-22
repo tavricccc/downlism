@@ -23,7 +23,6 @@ public sealed class SegmentStateFile : IDisposable
     private const int SegmentRecordLength = 8 + 8 + 8;
 
     private readonly SafeFileHandle _handle;
-    private readonly byte[] _record = new byte[SegmentRecordLength];
     private bool _disposed;
 
     private SegmentStateFile(SafeFileHandle handle, long totalLength, string validator, Segment[] segments)
@@ -90,7 +89,7 @@ public sealed class SegmentStateFile : IDisposable
 
             var totalLength = BinaryPrimitives.ReadInt64LittleEndian(header.AsSpan(8));
             var count = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(16));
-            if (count is <= 0 or > 1024) return Reject(handle);
+            if (totalLength <= 0 || count is <= 0 or > 1024) return Reject(handle);
 
             var validatorLength = BinaryPrimitives.ReadInt32LittleEndian(header.AsSpan(20));
             if (validatorLength is < 0 or > ValidatorCapacity) return Reject(handle);
@@ -100,15 +99,19 @@ public sealed class SegmentStateFile : IDisposable
             if (RandomAccess.Read(handle, body, HeaderLength) != body.Length) return Reject(handle);
 
             var segments = new Segment[count];
+            long expectedStart = 0;
             for (var index = 0; index < count; index++)
             {
                 var span = body.AsSpan(index * SegmentRecordLength);
                 var start = BinaryPrimitives.ReadInt64LittleEndian(span);
                 var end = BinaryPrimitives.ReadInt64LittleEndian(span[8..]);
                 var completed = BinaryPrimitives.ReadInt64LittleEndian(span[16..]);
-                if (start < 0 || end < start || completed < 0 || completed > end - start + 1) return Reject(handle);
+                if (start != expectedStart || end < start || end >= totalLength || completed < 0 || completed > end - start + 1)
+                    return Reject(handle);
+                expectedStart = end + 1;
                 segments[index] = new Segment(start, end, completed);
             }
+            if (expectedStart != totalLength) return Reject(handle);
 
             var opened = new SegmentStateFile(handle, totalLength, validator, segments);
             handle = null;
@@ -135,9 +138,14 @@ public sealed class SegmentStateFile : IDisposable
         ArgumentOutOfRangeException.ThrowIfNegative(index);
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(index, Segments.Length);
 
-        Segments[index] = Segments[index] with { Completed = completed };
-        WriteRecord(_record, Segments[index]);
-        RandomAccess.Write(_handle, _record, HeaderLength + (long)index * SegmentRecordLength);
+        if (completed < 0 || completed > Segments[index].Length) throw new ArgumentOutOfRangeException(nameof(completed));
+        var segment = Segments[index] with { Completed = completed };
+        // Each connection owns its record buffer. Sharing a byte[] here races concurrent
+        // checkpoints and writes another segment's offsets into this record.
+        Span<byte> record = stackalloc byte[SegmentRecordLength];
+        WriteRecord(record, segment);
+        RandomAccess.Write(_handle, record, HeaderLength + (long)index * SegmentRecordLength);
+        Segments[index] = segment;
     }
 
     public long CompletedBytes()

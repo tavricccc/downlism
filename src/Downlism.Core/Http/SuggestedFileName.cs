@@ -83,7 +83,7 @@ public static class SuggestedFileName
         var builder = new StringBuilder(name.Length);
         foreach (var character in name)
         {
-            builder.Append(char.IsControl(character) || Path.GetInvalidFileNameChars().Contains(character)
+            builder.Append(char.IsControl(character) || char.GetUnicodeCategory(character) == UnicodeCategory.Format || Path.GetInvalidFileNameChars().Contains(character)
                 ? '_'
                 : character);
         }
@@ -92,7 +92,18 @@ public static class SuggestedFileName
         var sanitized = builder.ToString().TrimEnd('.', ' ').Trim();
         if (sanitized.Length == 0 || sanitized is "." or "..") return Fallback;
 
-        return sanitized.Length > 255 ? sanitized[..255] : sanitized;
+        var stem = sanitized.Split('.')[0].ToUpperInvariant();
+        if (stem is "CON" or "PRN" or "AUX" or "NUL" or "CONIN$" or "CONOUT$" ||
+            (stem.Length == 4 && (stem.StartsWith("COM", StringComparison.Ordinal) || stem.StartsWith("LPT", StringComparison.Ordinal)) &&
+             (stem[3] is >= '1' and <= '9' or '¹' or '²' or '³')))
+            sanitized = "_" + sanitized;
+        // Leave room for the partial/sidecar suffix and collision numbering on NTFS.
+        if (sanitized.Length <= 220) return sanitized;
+        var extension = Path.GetExtension(sanitized);
+        if (extension.Length > 32) extension = "";
+        var count = 220 - extension.Length;
+        if (char.IsHighSurrogate(sanitized[count - 1])) count--;
+        return sanitized[..count] + extension;
     }
 
     /// <summary>Splits on semicolons that sit outside quoted strings.</summary>

@@ -32,6 +32,7 @@ public sealed record RetryPolicy(int MaximumAttempts = 3, double BackoffSeconds 
     public static bool IsTransient(Exception exception) => exception switch
     {
         TimeoutException => true,
+        InvalidDataException => false,
         IOException => true,
         HttpRequestException { StatusCode: null } => true,
         HttpRequestException { StatusCode: { } status } => IsTransient(status),

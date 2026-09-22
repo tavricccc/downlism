@@ -33,10 +33,10 @@ public static class FileHash
         };
 
         await using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 1024 * 1024, useAsync: true);
+            path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 1, useAsync: true);
 
         var total = stream.Length;
-        var buffer = new byte[1024 * 1024];
+        var buffer = new byte[64 * 1024];
         var read = 0L;
 
         while (true)

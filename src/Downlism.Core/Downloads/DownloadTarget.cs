@@ -43,12 +43,13 @@ public sealed class DownloadTarget : IDisposable
         var mode = resume && File.Exists(partialPath) ? FileMode.Open : FileMode.Create;
         var handle = File.OpenHandle(partialPath, mode, FileAccess.ReadWrite, FileShare.Read, FileOptions.Asynchronous);
 
-        if (totalLength is > 0 && RandomAccess.GetLength(handle) != totalLength)
+        try
         {
-            RandomAccess.SetLength(handle, totalLength.Value);
+            if (totalLength is >= 0 && RandomAccess.GetLength(handle) != totalLength)
+                RandomAccess.SetLength(handle, totalLength.Value);
+            return new DownloadTarget(handle, partialPath, finalPath);
         }
-
-        return new DownloadTarget(handle, partialPath, finalPath);
+        catch { handle.Dispose(); throw; }
     }
 
     public ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, long offset, CancellationToken cancellationToken)
@@ -66,7 +67,7 @@ public sealed class DownloadTarget : IDisposable
     /// </summary>
     public string Publish(Uri source)
     {
-        Flush();
+        if (!_disposed) Flush();
         Dispose();
 
         var destination = NextAvailablePath(FinalPath);

@@ -41,10 +41,7 @@ public sealed class TorrentEngine : ITransferEngine, IAsyncDisposable
 
     public TorrentEngine(HttpClient client) => _client = client;
 
-    public static string CacheDirectory => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Downlism",
-        "torrents");
+    public static string CacheDirectory => Path.Combine(Settings.AppDataPaths.Root, "torrents");
 
     /// <summary>
     /// The rate ceiling is a property of the session, not of one transfer: peers are shared and
@@ -147,7 +144,7 @@ public sealed class TorrentEngine : ITransferEngine, IAsyncDisposable
             return Existing(engine, link.InfoHashes) ?? await engine.AddAsync(link, directory).ConfigureAwait(false);
         }
 
-        var bytes = await _client.GetByteArrayAsync(request.Uri, cancellationToken).ConfigureAwait(false);
+        var bytes = await Http.BoundedHttpDownload.ReadAsync(_client, request, 16 * 1024 * 1024, cancellationToken).ConfigureAwait(false);
 
         if (!Torrent.TryLoad(bytes, out var torrent))
         {

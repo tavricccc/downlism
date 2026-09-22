@@ -52,7 +52,7 @@ public sealed class MediaEngine(MediaTools tools) : ITransferEngine
         // The real extension is not known until yt-dlp has picked or converted a format, and by
         // then the directory has to exist, so use the output choice to select its category.
         var categoryHint = request.MediaOutput == MediaOutput.Audio ? "audio.mp3" : "video.mp4";
-        var directory = DownloadCategory.DirectoryFor(request.Directory, categoryHint, request.SortIntoCategories);
+        var directory = DownloadCategory.DirectoryFor(request.Directory, categoryHint, request.SortIntoCategories, request.CategoryRules);
         System.IO.Directory.CreateDirectory(directory);
 
         state.SetNote("正在解析來源");
