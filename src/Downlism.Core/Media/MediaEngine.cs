@@ -131,7 +131,7 @@ public sealed class MediaEngine(MediaTools tools) : ITransferEngine
                 + "%(progress.total_bytes_estimate)s %(info.format_id)s",
             "--print",
             "after_move:" + FileMarker + "%(filepath)s",
-            "--ffmpeg-location", MediaTools.Directory,
+            "--ffmpeg-location", tools.ToolsDirectory,
             "--paths", "home:" + directory,
             // Trimmed to 120 bytes rather than characters: a CJK title can exceed MAX_PATH
             // long before it looks long.

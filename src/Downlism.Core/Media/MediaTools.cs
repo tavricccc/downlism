@@ -4,7 +4,7 @@ using Downlism.Core.Downloads;
 namespace Downlism.Core.Media;
 
 /// <summary>
-/// Fetches and keeps the two executables the media engine shells out to.
+/// Provisions yt-dlp, its JavaScript runtime, and the FFmpeg tools on first use.
 /// </summary>
 /// <remarks>
 /// yt-dlp and ffmpeg are not shipped inside the installer. ffmpeg alone is larger than the
@@ -23,8 +23,19 @@ namespace Downlism.Core.Media;
 /// stall timeout, the resume, the redirect walk and the segmenting, and a second, worse copy of
 /// that logic here would be the one that hangs forever with no way to tell.
 /// </remarks>
-public sealed class MediaTools(HttpClient client)
+public sealed class MediaTools
 {
+    private readonly HttpClient _client;
+    internal string ToolsDirectory { get; }
+
+    public MediaTools(HttpClient client) : this(client, Directory) { }
+
+    internal MediaTools(HttpClient client, string directory)
+    {
+        _client = client;
+        ToolsDirectory = directory;
+    }
+
     private const string YtDlpUrl = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
     private const string DenoUrl = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip";
 
@@ -47,14 +58,14 @@ public sealed class MediaTools(HttpClient client)
         "Downlism",
         "tools");
 
-    public string YtDlpPath => Path.Combine(Directory, "yt-dlp.exe");
+    public string YtDlpPath => Path.Combine(ToolsDirectory, "yt-dlp.exe");
 
-    public string FfmpegPath => Path.Combine(Directory, "ffmpeg.exe");
+    public string FfmpegPath => Path.Combine(ToolsDirectory, "ffmpeg.exe");
 
-    public string DenoPath => Path.Combine(Directory, "deno.exe");
+    public string DenoPath => Path.Combine(ToolsDirectory, "deno.exe");
 
     public bool IsReady => File.Exists(YtDlpPath) && File.Exists(DenoPath)
-        && File.Exists(FfmpegPath) && File.Exists(Path.Combine(Directory, "ffprobe.exe"));
+        && File.Exists(FfmpegPath) && File.Exists(Path.Combine(ToolsDirectory, "ffprobe.exe"));
 
     /// <summary>Makes sure yt-dlp is present before probing a page or downloading it.</summary>
     public async Task EnsureYtDlpAsync(
@@ -65,7 +76,7 @@ public sealed class MediaTools(HttpClient client)
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            System.IO.Directory.CreateDirectory(Directory);
+            System.IO.Directory.CreateDirectory(ToolsDirectory);
 
             if (!File.Exists(YtDlpPath))
             {
@@ -111,7 +122,7 @@ public sealed class MediaTools(HttpClient client)
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!File.Exists(FfmpegPath) || !File.Exists(Path.Combine(Directory, "ffprobe.exe")))
+            if (!File.Exists(FfmpegPath) || !File.Exists(Path.Combine(ToolsDirectory, "ffprobe.exe")))
             {
                 note?.Invoke("正在下載 ffmpeg（約 180 MB），只需要這一次");
                 await FetchArchiveAsync(FfmpegUrl, "ffmpeg.zip", ["ffprobe.exe", "ffmpeg.exe"], progress, cancellationToken)
@@ -168,12 +179,12 @@ public sealed class MediaTools(HttpClient client)
         string fileName,
         IProgress<DownloadProgress>? progress,
         CancellationToken cancellationToken)
-        => ToolDownload.FetchAsync(client, new Uri(url), Directory, fileName, progress, cancellationToken);
+        => ToolDownload.FetchAsync(_client, new Uri(url), ToolsDirectory, fileName, progress, cancellationToken);
 
     private async Task FetchArchiveAsync(string url, string archiveName, string[] executables,
         IProgress<DownloadProgress>? progress, CancellationToken cancellationToken)
     {
-        var archive = Path.Combine(Directory, archiveName);
+        var archive = Path.Combine(ToolsDirectory, archiveName);
 
         try
         {
@@ -189,9 +200,9 @@ public sealed class MediaTools(HttpClient client)
                     ?? throw new InvalidDataException($"{archiveName} 壓縮檔裡找不到 {wanted}。");
 
                 cancellationToken.ThrowIfCancellationRequested();
-                var staged = Path.Combine(Directory, ".staging", wanted);
+                var staged = Path.Combine(ToolsDirectory, ".staging", wanted);
                 entry.ExtractToFile(staged, overwrite: true);
-                File.Move(staged, Path.Combine(Directory, wanted), overwrite: true);
+                File.Move(staged, Path.Combine(ToolsDirectory, wanted), overwrite: true);
             }
         }
         finally
