@@ -13,7 +13,7 @@ public sealed class QueueTests
         var engine = new WaitingEngine();
         using var queue = new DownloadQueue(1, _ => engine);
         var first = queue.Add(Request);
-        await Until(() => first.State == DownloadState.Running);
+        await Until(() => first.State == DownloadState.Running && engine.Calls == 1);
         var second = queue.Add(Request);
         queue.Resume(second.Id);
         queue.Resume(second.Id);
@@ -21,7 +21,7 @@ public sealed class QueueTests
         await Until(() => first.State == DownloadState.Paused && second.State == DownloadState.Paused);
         Assert.Equal(1, engine.Calls);
         queue.Resume(second.Id);
-        await Until(() => second.State == DownloadState.Running);
+        await Until(() => second.State == DownloadState.Running && engine.Calls == 2);
         Assert.Equal(2, engine.Calls);
         queue.Pause(second.Id);
         await Until(() => second.State == DownloadState.Paused);
