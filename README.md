@@ -5,7 +5,7 @@
 <p align="center">Windows 下載管理員：分段下載、斷點續傳、影片與 BitTorrent，並可接手 Chrome、Edge 的下載。</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.10.0-0A84FF?style=flat-square" alt="Version 0.10.0" />
+  <img src="https://img.shields.io/badge/version-0.10.1-0A84FF?style=flat-square" alt="Version 0.10.1" />
   <img src="https://img.shields.io/badge/Windows_11-26100%2B-0078D4?style=flat-square" alt="Windows 11 build 26100+" />
   <img src="https://img.shields.io/badge/WinUI-3-0078D4?style=flat-square" alt="WinUI 3" />
   <img src="https://img.shields.io/badge/.NET-10-512BD4?style=flat-square" alt=".NET 10" />
@@ -66,7 +66,7 @@ HTTP 引擎負責分段與續傳，影片交給 yt-dlp，BitTorrent 由內建引
 
 ## 一個安裝程式
 
-`artifacts/installer/Downlism.Setup.exe`，目前版本為 0.10.0，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
+`artifacts/installer/Downlism.Setup.exe`，目前版本為 0.10.1，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
 
 | 裝到機器上的是 | 大小 | 需要什麼 |
 | --- | --- | --- |
@@ -93,7 +93,7 @@ HTTP 引擎負責分段與續傳，影片交給 yt-dlp，BitTorrent 由內建引
 
 HTTP／影片的連線與限速套用於新下載；同時下載數立即生效，降低時不會中斷已開始的傳輸。BitTorrent 的限速由全部種子共用。設定可匯出 JSON，匯入後需按儲存才套用。
 
-**開機時在背景啟動**寫的是目前使用者的 Run 機碼，帶 `--background` 啟動，只進系統匣不開視窗。這個開關也出現在系統匣選單裡。0.7.1 不再於安裝後自動啟用開機自啟；需要常駐時自行開啟。解除安裝會把機碼一併移除。
+**登入 Windows 時啟動**只進系統匣。若沒有開啟「啟動時繼續上次未完成的下載」，主視窗會等到打開 App 或接到新下載時才載入；開啟自動續傳後，啟動時會載入上次的下載。設定頁與系統匣選單都可以調整登入啟動。
 
 ## 擴充功能安裝教學
 

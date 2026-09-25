@@ -13,7 +13,8 @@ namespace Downlism.App.Services;
 /// </remarks>
 public sealed class IngestListener(
     Action<CaptureRequest> onCapture,
-    Func<Core.Settings.AppSettings> settings) : IDisposable
+    Func<Core.Settings.AppSettings> settings,
+    string? pipeName = null) : IDisposable
 {
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _loop;
@@ -26,7 +27,7 @@ public sealed class IngestListener(
         {
             try
             {
-                await using var server = IngestPipe.CreateServer();
+                await using var server = IngestPipe.CreateServer(pipeName);
                 await server.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
 
                 var message = await IngestPipe

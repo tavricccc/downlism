@@ -44,7 +44,14 @@ public partial class App : Application
 
         // Two instances would fight over the same partial files and the same ingest pipe, so a
         // second launch raises the existing window instead of opening another one.
-        _instanceGate = new SingleInstanceGate("Downlism.App", () => dispatcher.TryEnqueue(Raise));
+#if DEBUG
+        var isolatedMemoryTest = Environment.GetEnvironmentVariable("DOWNLISM_MEMORY_TEST") == "1";
+        var gateName = isolatedMemoryTest ? "Downlism.App.MemoryTest" : "Downlism.App";
+#else
+        const bool isolatedMemoryTest = false;
+        const string gateName = "Downlism.App";
+#endif
+        _instanceGate = new SingleInstanceGate(gateName, () => dispatcher.TryEnqueue(Raise));
         if (!_instanceGate.IsPrimary)
         {
             _instanceGate.Dispose();
@@ -52,44 +59,11 @@ public partial class App : Application
             return;
         }
 
-        _window = new MainWindow();
-
-        // The installer launches the first run with this switch. The extension cannot install
-        // itself, and the minute after installing is the only minute anyone is willing to
-        // follow four steps in chrome://extensions. Requested before the window is activated,
-        // because the window only promises to honour it while it is still unshown.
-        if (LoginStartupService.StartedForExtensionGuide())
-        {
-            _window.ShowExtensionGuideOnFirstFrame();
-
-            // Turned on once, on the launch that follows a fresh install. The extension hands
-            // downloads to whatever is listening, so a Downlism that is not running after a
-            // reboot quietly gives every download back to the browser -- which looks like the
-            // app failing rather than like a setting nobody switched on. Visible and
-            // reversible in both the tray menu and the settings flyout.
-            // Startup registration is now an explicit preference, not an install side effect.
-            _window.RefreshLaunchAtLogin();
-        }
-
-        // Closing the window hides it. Transfers continue, the browser can still hand new ones
-        // over, and the tray is where the app is actually quit.
-        _window.AppWindow.Closing += (_, closing) =>
-        {
-            if (_exiting) return;
-            closing.Cancel = true;
-            if (_window.Settings.CloseToTray) ShowWindow(Handle, Hide);
-            else dispatcher.TryEnqueue(ExitApplication);
-        };
-
         _tray = new TrayIcon { LaunchesAtLogin = _loginStartup.IsEnabled() };
         _tray.ShowRequested += (_, _) => dispatcher.TryEnqueue(Raise);
         _tray.PauseAllRequested += (_, _) => Queue.PauseAll();
         _tray.LaunchAtLoginToggled += (_, _) => dispatcher.TryEnqueue(ToggleLaunchAtLogin);
         _tray.ExitRequested += (_, _) => dispatcher.TryEnqueue(ExitApplication);
-
-        // The same switch exists in the settings flyout; whichever one is used, the other has
-        // to stop showing the old answer.
-        _window.LaunchAtLoginChanged += (_, _) => _tray.LaunchesAtLogin = _loginStartup.IsEnabled();
 
         Queue.Changed += OnQueueChanged;
         _trayRefresh = dispatcher.CreateTimer();
@@ -106,23 +80,39 @@ public partial class App : Application
             Environment.ProcessId,
             () => dispatcher.TryEnqueue(ExitApplication));
 
-        // Started by the Run key at sign-in: take the tray, leave the screen alone.
-        if (LoginStartupService.StartedInBackground())
+        var background = LoginStartupService.StartedInBackground();
+        var extensionGuide = LoginStartupService.StartedForExtensionGuide();
+        if (!background || extensionGuide || Downlism.Core.Settings.AppSettings.Load().ResumeOnStartup)
         {
-            _window.Activate();
-            ShowWindow(Handle, Hide);
-        }
-        else
-        {
-            _window.Activate();
-            ShowWindow(Handle, ShowNormal);
+            var window = EnsureWindow();
+            if (extensionGuide) window.ShowExtensionGuideOnFirstFrame();
+            window.Activate();
+            ShowWindow(Handle, background ? Hide : ShowNormal);
         }
 
-        // The listener starts after the window exists, so a download arriving during startup
-        // has somewhere to appear.
-        _ingest = new IngestListener(_window.AddFromBrowser, () => _window!.Settings);
+        // A browser handoff creates the main window only when one is needed to show the download.
+        _ingest = new IngestListener(
+            capture => dispatcher.TryEnqueue(() => EnsureWindow().AddFromBrowser(capture)),
+            () => _window?.Settings ?? Downlism.Core.Settings.AppSettings.Load(),
+            isolatedMemoryTest ? "Downlism.Ingest.MemoryTest" : null);
         _ingest.Start();
+    }
 
+    private MainWindow EnsureWindow()
+    {
+        if (_window is not null) return _window;
+        var dispatcher = DispatcherQueue.GetForCurrentThread();
+        var window = new MainWindow();
+        _window = window;
+        window.AppWindow.Closing += (_, closing) =>
+        {
+            if (_exiting) return;
+            closing.Cancel = true;
+            if (window.Settings.CloseToTray) ShowWindow(Handle, Hide);
+            else dispatcher.TryEnqueue(ExitApplication);
+        };
+        window.LaunchAtLoginChanged += (_, _) => { if (_tray is not null) _tray.LaunchesAtLogin = _loginStartup.IsEnabled(); };
+        return window;
     }
 
     private nint Handle => _window is null
@@ -183,10 +173,9 @@ public partial class App : Application
 
     private void Raise()
     {
-        if (_window is null) return;
-
+        var window = EnsureWindow();
+        window.Activate();
         ShowWindow(Handle, Restore);
-        _window.Activate();
     }
 
     private void ExitApplication()
