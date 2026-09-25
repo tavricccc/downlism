@@ -2,11 +2,10 @@
 
 <h1 align="center">Downlism</h1>
 
-**0.9.0：** 下載中顯示即時速度，完成後改顯示保存的平均速度。驗證結果與限制見 [0.9.0 說明](docs/release-0.9.0.md)。
-<p align="center">多執行緒下載、斷點續傳、影片嗅探與 BitTorrent，並接手 Chrome 與 Edge 的下載。</p>
+<p align="center">Windows 下載管理員：分段下載、斷點續傳、影片與 BitTorrent，並可接手 Chrome、Edge 的下載。</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.9.0-0A84FF?style=flat-square" alt="Version 0.9.0" />
+  <img src="https://img.shields.io/badge/version-0.9.1-0A84FF?style=flat-square" alt="Version 0.9.1" />
   <img src="https://img.shields.io/badge/Windows_11-26100%2B-0078D4?style=flat-square" alt="Windows 11 build 26100+" />
   <img src="https://img.shields.io/badge/WinUI-3-0078D4?style=flat-square" alt="WinUI 3" />
   <img src="https://img.shields.io/badge/.NET-10-512BD4?style=flat-square" alt=".NET 10" />
@@ -15,7 +14,11 @@
   <img src="https://img.shields.io/badge/status-preview-D97706?style=flat-square" alt="Preview" />
 </p>
 
-Downlism 把一個檔案切成多段、用多條連線同時下載，中斷後從原處接回去。網頁上播放的影片會被找出來交給 yt-dlp，磁力連結與種子檔則走內建的 BitTorrent。它是獨立產品，與 [Flowlism](https://github.com/tavricccc/flowlism) 啟動器、[Peeklism](https://github.com/tavricccc/peeklism) 預覽工具分開安裝、分開更新；三者共用同一套視覺語言（WinUI 3、Mica、Fluent），但不共用行程，也沒有互相依賴。
+Downlism 把瀏覽器下載、影片和種子檔放進同一個清單。貼上連結或從 Chrome、Edge 送出下載，就能看到每個檔案的進度和速度；需要離開時先暫停，下次從中斷處繼續。影片可在下載前挑選畫質或音訊格式，磁力連結和 `.torrent` 也能直接加入。
+
+下載完成後，檔案會依類型放到指定資料夾。佇列、同時下載數和速度上限可以自己調整；主視窗關閉後仍可留在系統匣繼續下載。失敗的項目會顯示原因，完成的項目和下載紀錄也會保留下來。
+
+從 [GitHub Releases](https://github.com/tavricccc/downlism/releases/latest) 下載 `Downlism.Setup.exe`。支援 Windows 11 build 26100 以上、x64；安裝在目前使用者帳號，不需要管理員權限。安裝檔包含共用與自帶 Windows App 執行環境兩種版型，會依電腦狀態選擇。安裝檔尚未簽章。
 
 ## 介面
 
@@ -63,7 +66,7 @@ HTTP 引擎負責分段與續傳，影片交給 yt-dlp，BitTorrent 由內建引
 
 ## 一個安裝程式
 
-`artifacts/installer/Downlism.Setup.exe`，目前版本為 0.9.0，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
+`artifacts/installer/Downlism.Setup.exe`，目前版本為 0.9.1，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
 
 | 裝到機器上的是 | 大小 | 需要什麼 |
 | --- | --- | --- |
