@@ -38,6 +38,21 @@ public sealed class DownloadQueue : IDisposable
     public RetryPolicy Retry { get; set; } = RetryPolicy.Default;
     public event Action<DownloadJob>? Changed;
     public IEnumerable<DownloadJob> Jobs { get { lock (_sync) return _entries.Values.Select(entry => entry.Job).ToArray(); } }
+    public (int Count, double BytesPerSecond) RunningSummary()
+    {
+        lock (_sync)
+        {
+            var count = 0;
+            var speed = 0d;
+            foreach (var entry in _entries.Values)
+            {
+                if (entry.Job.State != DownloadState.Running) continue;
+                count++;
+                speed += entry.Job.Progress?.BytesPerSecond ?? 0;
+            }
+            return (count, speed);
+        }
+    }
 
     public DownloadJob Add(DownloadRequest request)
     {

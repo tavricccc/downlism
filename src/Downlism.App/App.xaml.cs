@@ -96,8 +96,8 @@ public partial class App : Application
         _trayRefresh.Interval = TimeSpan.FromMilliseconds(500);
         _trayRefresh.Tick += (_, _) =>
         {
-            var active = Queue.Jobs.Where(job => job.State == DownloadState.Running).ToArray();
-            _tray.UpdateTooltip(active.Length, active.Sum(job => job.Progress?.BytesPerSecond ?? 0));
+            var active = Queue.RunningSummary();
+            _tray.UpdateTooltip(active.Count, active.BytesPerSecond);
         };
         _trayRefresh.Start();
 
