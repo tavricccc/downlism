@@ -3,7 +3,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Downlism 設定">
     <Grid x:Name="Root" Padding="24,16,24,20" RowSpacing="16">
         <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-        <TextBlock Text="設定" Style="{ThemeResource TitleTextBlockStyle}" FontWeight="Normal"/>
+        <TextBlock Text="設定" Style="{ThemeResource TitleTextBlockStyle}"/>
         <Pivot Grid.Row="1" x:Name="Sections">
             <PivotItem Header="下載">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">

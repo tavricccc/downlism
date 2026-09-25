@@ -5,7 +5,7 @@
 <p align="center">Windows 下載管理員：分段下載、斷點續傳、影片與 BitTorrent，並可接手 Chrome、Edge 的下載。</p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.10.1-0A84FF?style=flat-square" alt="Version 0.10.1" />
+  <img src="https://img.shields.io/badge/version-0.10.2-0A84FF?style=flat-square" alt="Version 0.10.2" />
   <img src="https://img.shields.io/badge/Windows_11-26100%2B-0078D4?style=flat-square" alt="Windows 11 build 26100+" />
   <img src="https://img.shields.io/badge/WinUI-3-0078D4?style=flat-square" alt="WinUI 3" />
   <img src="https://img.shields.io/badge/.NET-10-512BD4?style=flat-square" alt=".NET 10" />
@@ -66,7 +66,7 @@ HTTP 引擎負責分段與續傳，影片交給 yt-dlp，BitTorrent 由內建引
 
 ## 一個安裝程式
 
-`artifacts/installer/Downlism.Setup.exe`，目前版本為 0.10.1，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
+`artifacts/installer/Downlism.Setup.exe`，目前版本為 0.10.2，一個檔案。裡面同時帶著兩種版型與共用執行環境的套件，安裝時自己決定裝哪一種。
 
 | 裝到機器上的是 | 大小 | 需要什麼 |
 | --- | --- | --- |

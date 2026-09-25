@@ -6,6 +6,7 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
+            <FontFamily x:Key="ContentControlThemeFontFamily">Segoe UI Variable Text, Microsoft JhengHei UI</FontFamily>
 
             <!-- Row actions carry no chrome until the pointer is over them. Four bordered
                  buttons on every row would out-shout the ribbon they sit above. -->
