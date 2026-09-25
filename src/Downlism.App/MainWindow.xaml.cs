@@ -227,6 +227,13 @@ public sealed partial class MainWindow : Window
         {
             "name" => wanted.OrderBy(row => row.FileName, StringComparer.CurrentCultureIgnoreCase),
             "source" => wanted.OrderBy(row => row.Job.Request.Uri.Host, StringComparer.OrdinalIgnoreCase),
+            "status" => wanted.OrderBy(row => row.Job.State switch
+            {
+                DownloadState.Running => 0, DownloadState.Queued => 1, DownloadState.Retrying => 2,
+                DownloadState.Paused => 3, DownloadState.Failed => 4, DownloadState.Completed => 5,
+                _ => 6,
+            }),
+            "size" => wanted.OrderByDescending(row => row.Job.Progress?.TotalBytes ?? -1),
             _ => wanted,
         };
         var target = wanted.ToArray();

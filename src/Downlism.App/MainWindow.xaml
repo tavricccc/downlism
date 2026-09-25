@@ -32,6 +32,7 @@
             <TextBox x:Name="SearchBox" Grid.Column="1" PlaceholderText="搜尋檔名或來源" TextChanged="SearchChanged" AutomationProperties.Name="搜尋下載"/>
             <ComboBox x:Name="SortOrder" Grid.Column="2" SelectedIndex="0" SelectionChanged="StatusFilterChanged" HorizontalAlignment="Stretch" AutomationProperties.Name="下載排序">
                 <ComboBoxItem Content="最新加入" Tag="newest"/><ComboBoxItem Content="檔名 A–Z" Tag="name"/><ComboBoxItem Content="來源網站" Tag="source"/>
+                <ComboBoxItem Content="下載狀態" Tag="status"/><ComboBoxItem Content="檔案大小" Tag="size"/>
             </ComboBox>
             <Button x:Name="ClearCompletedButton" Grid.Column="3" Content="清除已完成" Click="ClearCompletedClick" ToolTipService.ToolTip="只清除紀錄，不刪除檔案"/>
         </Grid>
