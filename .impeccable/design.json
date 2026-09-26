@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-26T00:00:00Z",
+  "title": "Design System: Downlism",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Cobalt",
+        "canonical": "#075bb8",
+        "tonalRamp": [
+          "#06182b",
+          "#0b2d53",
+          "#10457f",
+          "#075bb8",
+          "#4387d2",
+          "#86b4e5",
+          "#c2daf1",
+          "#eef6fd"
+        ]
+      },
+      "page": {
+        "role": "neutral",
+        "displayName": "Cool page",
+        "canonical": "#f5f7f8",
+        "tonalRamp": [
+          "#17232b",
+          "#36454e",
+          "#66757e",
+          "#95a3ab",
+          "#b8c3ca",
+          "#d8e0e4",
+          "#edf1f3",
+          "#f5f7f8"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Hero headline."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section headlines."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Explanations and detail."
+      }
+    },
+    "shadows": [
+      {
+        "name": "navigation-panel",
+        "value": "0 18px 38px -25px rgba(0,0,0,.18)",
+        "purpose": "Mobile menu elevation only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "range-arrive",
+        "value": ".55s cubic-bezier(.16,1,.3,1)",
+        "purpose": "Once-only illustration of acquiring ranges; removed under reduced motion."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "tablet",
+        "value": "1100px"
+      },
+      {
+        "name": "mobile",
+        "value": "760px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary download link",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The main installer action.",
+      "html": "<a class=\"ds-button\" href=\"#\">取得 Windows 安裝程式</a>",
+      "css": ".ds-button{display:inline-flex;align-items:center;min-height:54px;padding:12px 22px;border-radius:4px;background:#075bb8;color:#fff;font:800 15px sans-serif;text-decoration:none}.ds-button:hover{background:#004a9b}.ds-button:focus-visible{outline:3px solid #075bb8;outline-offset:4px}.ds-button:active{transform:translateY(1px)}"
+    },
+    {
+      "name": "Range explanation",
+      "kind": "custom",
+      "description": "A labeled illustration of retained and pending byte ranges.",
+      "html": "<div class=\"ds-range\"><span>已取得</span><i></i><i></i><i></i><i></i></div>",
+      "css": ".ds-range{display:flex;gap:6px;align-items:center;padding:20px;border:1px solid #c9d4dd;background:#fff;color:#142331;font:700 14px sans-serif}.ds-range i{display:block;height:24px;flex:1;background:#075bb8}"
+    }
+  ],
+  "narrative": {
+    "northStar": "A clear transfer record",
+    "overview": "Large Traditional Chinese type, real app captures, a labeled range diagram, cool neutral surfaces, and one cobalt accent.",
+    "keyCharacteristics": [
+      "Asymmetric two-column evidence sections",
+      "Thin line structure",
+      "Real desktop app captures"
+    ],
+    "rules": [
+      {
+        "name": "One accent",
+        "body": "Cobalt carries actions and transfer states across the page.",
+        "section": "colors"
+      },
+      {
+        "name": "Evidence first",
+        "body": "Use actual app captures and label process diagrams as illustrations.",
+        "section": "components"
+      }
+    ],
+    "dos": [
+      "Use current README facts and release path.",
+      "Keep light and dark themes internally consistent."
+    ],
+    "donts": [
+      "Revive the obsolete segmented UI claim.",
+      "Replace app captures with HTML facsimiles."
+    ]
+  }
+}
